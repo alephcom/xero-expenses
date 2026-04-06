@@ -3,12 +3,14 @@
 namespace App\Services\Xero;
 
 use App\Models\ExpenseLine;
+use App\Models\LineReview;
 use App\Models\LinkedTransactionLine;
 use App\Models\Organisation;
 use App\Models\SyncRun;
 use App\Models\XeroAccount;
 use App\Models\XeroContact;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
@@ -469,6 +471,67 @@ class XeroSyncService
 
         foreach (array_chunk($rows, 250) as $chunk) {
             LinkedTransactionLine::withoutGlobalScopes()->insert($chunk);
+        }
+
+        $this->reconcileLineReviewInvoiceFlagsFromLinkedTransactions($organisation);
+    }
+
+    /**
+     * Set needs_invoicing (and invoice-to contact) from Xero billable links that include a customer.
+     * On duplicate key, only needs_invoicing, selected_contact_id, reviewed_at, and updated_at are updated
+     * so existing notes and is_reviewed are preserved.
+     */
+    public function reconcileLineReviewInvoiceFlagsFromLinkedTransactions(Organisation $organisation): void
+    {
+        $pairs = DB::table('expense_lines as el')
+            ->join('linked_transaction_lines as ltl', function ($join): void {
+                $join->on('ltl.organisation_id', '=', 'el.organisation_id')
+                    ->on('ltl.source_transaction_id', '=', 'el.parent_transaction_id')
+                    ->on('ltl.source_line_item_id', '=', 'el.line_item_id');
+            })
+            ->where('el.organisation_id', $organisation->id)
+            ->whereNotNull('ltl.contact_id')
+            ->select([
+                'el.organisation_id',
+                'el.source_kind',
+                'el.parent_transaction_id',
+                'el.line_item_id',
+                'ltl.contact_id',
+            ])
+            ->distinct()
+            ->get();
+
+        if ($pairs->isEmpty()) {
+            return;
+        }
+
+        $now = now();
+        $payload = [];
+        foreach ($pairs as $row) {
+            $payload[] = [
+                'organisation_id' => (int) $row->organisation_id,
+                'source_kind' => (string) $row->source_kind,
+                'parent_transaction_id' => (string) $row->parent_transaction_id,
+                'line_item_id' => (string) $row->line_item_id,
+                'needs_invoicing' => true,
+                'selected_contact_id' => (string) $row->contact_id,
+                'is_reviewed' => false,
+                'notes' => null,
+                'user_id' => null,
+                'xero_last_pushed_notes' => null,
+                'xero_push_error' => null,
+                'reviewed_at' => $now,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+
+        foreach (array_chunk($payload, 250) as $chunk) {
+            LineReview::withoutGlobalScopes()->upsert(
+                $chunk,
+                ['organisation_id', 'source_kind', 'parent_transaction_id', 'line_item_id'],
+                ['needs_invoicing', 'selected_contact_id', 'reviewed_at', 'updated_at'],
+            );
         }
     }
 }
