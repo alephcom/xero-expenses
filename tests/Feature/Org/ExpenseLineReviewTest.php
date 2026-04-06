@@ -732,6 +732,76 @@ class ExpenseLineReviewTest extends TestCase
         $this->assertTrue($review->needs_invoicing);
     }
 
+    public function test_toggle_needs_invoicing_off_blocked_when_open_customer_link_in_xero_mirror(): void
+    {
+        Queue::fake();
+
+        $user = User::factory()->create();
+        $org = Organisation::create([
+            'name' => 'Open Link Org',
+            'slug' => 'open-link-org',
+            'xero_tenant_id' => (string) Str::uuid(),
+        ]);
+        $org->users()->attach($user->id, ['role' => 'admin']);
+
+        $parentId = (string) Str::uuid();
+        $lineId = (string) Str::uuid();
+        $contactId = (string) Str::uuid();
+        $day = Carbon::now()->subDay()->toDateString();
+
+        DB::table('expense_lines')->insert([
+            'organisation_id' => $org->id,
+            'source_kind' => 'spend',
+            'parent_transaction_id' => $parentId,
+            'line_item_id' => $lineId,
+            'occurred_on' => $day,
+            'line_amount' => 1,
+            'currency_code' => 'USD',
+            'account_id' => null,
+            'account_code' => '4000',
+            'description' => 'x',
+            'parent_reference' => 'R',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('linked_transaction_lines')->insert([
+            'organisation_id' => $org->id,
+            'xero_linked_transaction_id' => (string) Str::uuid(),
+            'source_transaction_id' => $parentId,
+            'source_line_item_id' => $lineId,
+            'contact_id' => $contactId,
+            'target_transaction_id' => null,
+            'target_line_item_id' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        LineReview::withoutGlobalScopes()->create([
+            'organisation_id' => $org->id,
+            'source_kind' => 'spend',
+            'parent_transaction_id' => $parentId,
+            'line_item_id' => $lineId,
+            'needs_invoicing' => true,
+            'is_reviewed' => false,
+            'selected_contact_id' => $contactId,
+            'notes' => null,
+        ]);
+
+        Livewire::actingAs($user)
+            ->test(ExpenseLineReview::class, ['organisation' => $org])
+            ->set('dateFrom', $day)
+            ->set('dateTo', $day)
+            ->call('toggleNeedsInvoicing', 'spend', $parentId, $lineId, false)
+            ->assertHasNoErrors();
+
+        Queue::assertNotPushed(PushLineReviewToXeroJob::class);
+
+        $review = LineReview::withoutGlobalScopes()->where('organisation_id', $org->id)->first();
+        $this->assertNotNull($review);
+        $this->assertTrue($review->needs_invoicing);
+    }
+
     public function test_update_selected_contact_does_not_run_when_link_allocated_in_xero_mirror(): void
     {
         Queue::fake();

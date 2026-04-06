@@ -263,6 +263,9 @@
                                     $leadCellBorder = 'border-l-4 border-indigo-400';
                                     $lineBlockEndBorder = $rowExpanded ? '' : 'border-b border-gray-200';
                                     $billableLocked = ! empty($row->billable_link_target_transaction_id);
+                                    $openBillableCustomerLinkInXero = ! empty($row->linked_contact_id) && empty($row->billable_link_target_transaction_id);
+                                    $invoiceCheckboxLocked = $billableLocked || $openBillableCustomerLinkInXero;
+                                    $invoiceCheckboxChecked = (bool) $row->needs_invoicing || $openBillableCustomerLinkInXero;
                                 @endphp
                                 <tr
                                     wire:key="el-{{ $row->source_kind }}-{{ $row->parent_transaction_id }}-{{ $row->line_item_id }}"
@@ -345,6 +348,8 @@
                                                     @endif
                                                     @if ($billableLocked)
                                                         <p class="text-xs text-amber-800 mt-1">{{ __('Invoiced in Xero') }}</p>
+                                                    @elseif ($openBillableCustomerLinkInXero)
+                                                        <p class="text-xs text-gray-600 mt-1">{{ __('Linked for billing in Xero') }}</p>
                                                     @endif
                                                 </td>
                                                 @break
@@ -363,8 +368,11 @@
                                                     <input
                                                         type="checkbox"
                                                         class="rounded border-gray-300 text-indigo-600 shadow-sm focus:ring-indigo-500 disabled:opacity-50"
-                                                        @checked($row->needs_invoicing)
-                                                        @if ($billableLocked) disabled title="{{ __('This line is already on a sales invoice in Xero.') }}" @endif
+                                                        @checked($invoiceCheckboxChecked)
+                                                        @if ($invoiceCheckboxLocked)
+                                                            disabled
+                                                            title="{{ $billableLocked ? __('This line is already on a sales invoice in Xero.') : __('This expense is already linked to a customer in Xero.') }}"
+                                                        @endif
                                                         wire:change="toggleNeedsInvoicing(@js($row->source_kind), @js($row->parent_transaction_id), @js($row->line_item_id), $event.target.checked)"
                                                     />
                                                 </td>

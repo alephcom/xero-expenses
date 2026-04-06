@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Lock billable edits when invoiced in Xero:** Linked transactions that include a `TargetTransactionID` (allocated to a sales invoice) are stored locally; reconcile sets `needs_invoicing` false, the review UI disables invoice and invoice-to controls, and write-back skips creating, updating, or deleting those links (API payloads with a target are never mutated).
 
+- **Invoice checkbox when already linked in Xero:** If a billable link includes a customer and is not yet on a sales invoice, the “needs invoicing” checkbox stays on and cannot be turned off here (matching Xero); clearing it requires changing the link in Xero.
+
 - **Xero billable expense write-back:** When you mark a line for invoicing, choose an invoice-to contact, or save notes, the app queues a job that updates Xero. Billable expenses use the Linked Transactions API (SPEND and ACCPAY lines). Notes are appended via History on the parent bank transaction or bill, prefixed so multi-line parents stay distinguishable. Linked transaction sync now stores every link from Xero (including drafts without a contact) plus each link’s Xero id. Line reviews record the last pushed note text for deduplication and any push error for display in the expanded row.
 - **Invoice flag from Xero:** After linked transactions are synced, any expense line with a billable link that includes a customer in Xero gets `needs_invoicing` and `selected_contact_id` updated to match. Existing notes and reviewed state on a line review are left unchanged when reconciling.
 
