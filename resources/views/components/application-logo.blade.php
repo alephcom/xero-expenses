@@ -1,0 +1,6 @@
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" {{ $attributes }}>
+    <rect fill="currentColor" fill-opacity="0.12" width="32" height="32" rx="7"/>
+    <rect x="13" y="7" width="12" height="18" rx="1.8" fill="#ffffff" stroke="currentColor" stroke-width="1.25"/>
+    <path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M15.2 11.2h7.6M15.2 14.4h6.2M15.2 17.6h7.6M15.2 20.8h5"/>
+    <path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M7.5 9.5l7.2 13M14.7 9.5l-7.2 13"/>
+</svg>
