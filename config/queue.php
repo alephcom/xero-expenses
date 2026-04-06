@@ -126,4 +126,16 @@ return [
         'table' => 'failed_jobs',
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Queue job lifecycle logging
+    |--------------------------------------------------------------------------
+    |
+    | When true, the application logs queued / processing / processed / failed
+    | events to the default log channel (message key: queue.job).
+    |
+    */
+
+    'log_jobs' => env('QUEUE_LOG_JOBS', true),
+
 ];
