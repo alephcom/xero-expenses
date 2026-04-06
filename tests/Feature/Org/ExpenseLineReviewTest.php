@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Org;
 
+use App\Jobs\PushLineReviewToXeroJob;
 use App\Jobs\SyncXeroOrganisationJob;
 use App\Livewire\Org\ExpenseLineReview;
 use App\Models\LineReview;
@@ -409,6 +410,8 @@ class ExpenseLineReviewTest extends TestCase
 
     public function test_update_notes_persists_at_max_length(): void
     {
+        Queue::fake();
+
         $user = User::factory()->create();
         $org = Organisation::create([
             'name' => 'Notes Ok Org',
@@ -492,6 +495,8 @@ class ExpenseLineReviewTest extends TestCase
 
     public function test_update_selected_contact_persists_when_xero_contact_exists(): void
     {
+        Queue::fake();
+
         $user = User::factory()->create();
         $org = Organisation::create([
             'name' => 'Contact Ok Org',
@@ -543,6 +548,8 @@ class ExpenseLineReviewTest extends TestCase
 
     public function test_update_selected_contact_clears_with_empty_string(): void
     {
+        Queue::fake();
+
         $user = User::factory()->create();
         $org = Organisation::create([
             'name' => 'Clear Org',
@@ -605,6 +612,53 @@ class ExpenseLineReviewTest extends TestCase
         $review = LineReview::withoutGlobalScopes()->where('organisation_id', $org->id)->first();
         $this->assertNotNull($review);
         $this->assertNull($review->selected_contact_id);
+    }
+
+    public function test_toggle_needs_invoicing_dispatches_push_line_review_to_xero_job(): void
+    {
+        Queue::fake();
+
+        $user = User::factory()->create();
+        $org = Organisation::create([
+            'name' => 'Writeback Org',
+            'slug' => 'writeback-org',
+            'xero_tenant_id' => (string) Str::uuid(),
+        ]);
+        $org->users()->attach($user->id, ['role' => 'admin']);
+
+        $parentId = (string) Str::uuid();
+        $lineId = (string) Str::uuid();
+        $day = Carbon::now()->subDay()->toDateString();
+
+        DB::table('expense_lines')->insert([
+            'organisation_id' => $org->id,
+            'source_kind' => 'spend',
+            'parent_transaction_id' => $parentId,
+            'line_item_id' => $lineId,
+            'occurred_on' => $day,
+            'line_amount' => 1,
+            'currency_code' => 'USD',
+            'account_id' => null,
+            'account_code' => '4000',
+            'description' => 'x',
+            'parent_reference' => 'R',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Livewire::actingAs($user)
+            ->test(ExpenseLineReview::class, ['organisation' => $org])
+            ->set('dateFrom', $day)
+            ->set('dateTo', $day)
+            ->call('toggleNeedsInvoicing', 'spend', $parentId, $lineId, true)
+            ->assertHasNoErrors();
+
+        Queue::assertPushed(PushLineReviewToXeroJob::class, function (PushLineReviewToXeroJob $job) use ($org, $parentId, $lineId): bool {
+            return $job->organisationId === $org->id
+                && $job->sourceKind === 'spend'
+                && $job->parentTransactionId === $parentId
+                && $job->lineItemId === $lineId;
+        });
     }
 
     public function test_line_review_mutations_reject_when_expense_line_missing(): void
@@ -816,7 +870,7 @@ class ExpenseLineReviewTest extends TestCase
             ->set('dateTo', $day)
             ->html();
 
-        $this->assertSame(4, substr_count($html, $expectedAttr));
+        $this->assertSame(2, substr_count($html, $expectedAttr));
 
         $row = (object) [
             'source_kind' => 'spend',

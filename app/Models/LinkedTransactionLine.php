@@ -12,6 +12,7 @@ class LinkedTransactionLine extends Model
 
     protected $fillable = [
         'organisation_id',
+        'xero_linked_transaction_id',
         'source_transaction_id',
         'source_line_item_id',
         'contact_id',

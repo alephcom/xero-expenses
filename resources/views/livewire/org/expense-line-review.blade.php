@@ -238,7 +238,7 @@
                                 </th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-gray-100">
+                        <tbody>
                             @forelse ($rows as $row)
                                 @php
                                     $rowExpanded = $this->isLineExpanded($row);
@@ -253,15 +253,13 @@
                                     $summaryRowClass = $g['stripe'] === 0
                                         ? 'bg-indigo-50/30 hover:bg-indigo-100/40'
                                         : 'bg-white hover:bg-gray-50/90';
-                                    $descRowClass = $g['stripe'] === 0
-                                        ? 'bg-indigo-50/35 hover:bg-indigo-100/30'
-                                        : 'bg-gray-50/50 hover:bg-gray-100/40';
                                     $detailRowClass = $g['stripe'] === 0 ? 'bg-indigo-50/50' : 'bg-gray-50';
                                     $leadCellBorder = 'border-l-4 border-indigo-400';
+                                    $lineBlockEndBorder = $rowExpanded ? '' : 'border-b border-gray-200';
                                 @endphp
                                 <tr
                                     wire:key="el-{{ $row->source_kind }}-{{ $row->parent_transaction_id }}-{{ $row->line_item_id }}"
-                                    class="{{ $groupSepClass }} {{ $summaryRowClass }}"
+                                    class="{{ $groupSepClass }} {{ $summaryRowClass }} {{ $lineBlockEndBorder }}"
                                     data-parent-group="{{ e($g['key']) }}"
                                     data-parent-group-start="{{ $g['is_start'] ? '1' : '0' }}"
                                     data-parent-group-end="{{ $g['is_end'] ? '1' : '0' }}"
@@ -284,7 +282,14 @@
                                     @foreach ($visibleCols as $colKey)
                                         @switch($colKey)
                                             @case('date')
-                                                <td class="px-3 py-2 whitespace-nowrap text-gray-700 align-top">{{ \Illuminate\Support\Carbon::parse($row->occurred_on)->format('Y-m-d') }}</td>
+                                                <td class="px-3 py-2 whitespace-nowrap text-gray-700 align-top">
+                                                    {{ \Illuminate\Support\Carbon::parse($row->occurred_on)->format('Y-m-d') }}
+                                                    @if (! in_array('supplier', $visibleCols, true))
+                                                        @if ($row->description !== null && $row->description !== '')
+                                                            <p class="text-sm text-gray-600 line-clamp-3 break-words mt-1.5 max-w-[18rem] whitespace-normal" title="{{ $row->description }}">{{ $row->description }}</p>
+                                                        @endif
+                                                    @endif
+                                                </td>
                                                 @break
                                             @case('type')
                                                 <td class="px-3 py-2 text-gray-700 align-top">{{ $row->source_kind === 'bill' ? __('Bill') : __('Spend') }}</td>
@@ -313,11 +318,14 @@
                                                 <td class="px-3 py-2 text-right tabular-nums text-gray-900 align-top">{{ number_format((float) $row->line_amount, 2) }} {{ $row->currency_code }}</td>
                                                 @break
                                             @case('supplier')
-                                                <td class="px-3 py-2 text-gray-700 max-w-[12rem] align-top">
+                                                <td class="px-3 py-2 text-gray-700 max-w-[14rem] align-top">
                                                     @if ($row->parent_contact_name)
-                                                        <div class="truncate" title="{{ $row->parent_contact_name }}">{{ $row->parent_contact_name }}</div>
+                                                        <div class="font-medium text-gray-900 truncate" title="{{ $row->parent_contact_name }}">{{ $row->parent_contact_name }}</div>
                                                     @else
-                                                        <span class="text-gray-400">—</span>
+                                                        <span class="font-medium text-gray-400">—</span>
+                                                    @endif
+                                                    @if ($row->description !== null && $row->description !== '')
+                                                        <p class="text-sm text-gray-600 font-normal line-clamp-3 break-words mt-1.5" title="{{ $row->description }}">{{ $row->description }}</p>
                                                     @endif
                                                 </td>
                                                 @break
@@ -383,21 +391,10 @@
                                         @endswitch
                                     @endforeach
                                 </tr>
-                                <tr
-                                    wire:key="el-desc-{{ $row->source_kind }}-{{ $row->parent_transaction_id }}-{{ $row->line_item_id }}"
-                                    class="{{ $descRowClass }}"
-                                    data-parent-group="{{ e($g['key']) }}"
-                                    data-parent-group-start="{{ $g['is_start'] ? '1' : '0' }}"
-                                    data-parent-group-end="{{ $g['is_end'] ? '1' : '0' }}"
-                                >
-                                    <td colspan="{{ $tableColCount }}" class="px-3 py-2 pl-11 border-t border-gray-100/80 {{ $leadCellBorder }}">
-                                        <p class="text-sm text-gray-800 line-clamp-3 break-words" title="{{ $row->description }}">{{ $row->description !== null && $row->description !== '' ? $row->description : '—' }}</p>
-                                    </td>
-                                </tr>
                                 @if ($rowExpanded)
                                     <tr
                                         wire:key="el-detail-{{ $row->source_kind }}-{{ $row->parent_transaction_id }}-{{ $row->line_item_id }}"
-                                        class="{{ $detailRowClass }}"
+                                        class="{{ $detailRowClass }} border-b border-gray-200"
                                         data-parent-group="{{ e($g['key']) }}"
                                         data-parent-group-start="{{ $g['is_start'] ? '1' : '0' }}"
                                         data-parent-group-end="{{ $g['is_end'] ? '1' : '0' }}"
@@ -499,6 +496,12 @@
                                                         wire:blur="updateNotes(@js($row->source_kind), @js($row->parent_transaction_id), @js($row->line_item_id), $event.target.value)"
                                                     />
                                                 </div>
+                                                @if (! empty($row->xero_push_error))
+                                                    <div class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+                                                        <p class="font-medium">{{ __('Could not update Xero') }}</p>
+                                                        <p class="mt-1 text-red-700 whitespace-pre-wrap break-words">{{ $row->xero_push_error }}</p>
+                                                    </div>
+                                                @endif
                                             </div>
                                         </td>
                                     </tr>

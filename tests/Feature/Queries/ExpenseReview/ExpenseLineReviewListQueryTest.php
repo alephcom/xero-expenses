@@ -134,6 +134,7 @@ class ExpenseLineReviewListQueryTest extends TestCase
 
         DB::table('linked_transaction_lines')->insert([
             'organisation_id' => $org->id,
+            'xero_linked_transaction_id' => (string) Str::uuid(),
             'source_transaction_id' => $linkedParent,
             'source_line_item_id' => $linkedLine,
             'contact_id' => $contactId,

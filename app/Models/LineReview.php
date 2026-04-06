@@ -19,6 +19,8 @@ class LineReview extends Model
         'needs_invoicing',
         'selected_contact_id',
         'notes',
+        'xero_last_pushed_notes',
+        'xero_push_error',
         'user_id',
         'reviewed_at',
     ];

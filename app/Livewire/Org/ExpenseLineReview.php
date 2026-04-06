@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Org;
 
+use App\Jobs\PushLineReviewToXeroJob;
 use App\Jobs\SyncXeroOrganisationJob;
 use App\Models\ExpenseLine;
 use App\Models\LineReview;
@@ -67,12 +68,12 @@ class ExpenseLineReview extends Component
     /** @var list<string> */
     private const DATA_COLUMN_KEYS = [
         'date',
+        'supplier',
+        'amount',
         'type',
         'ref',
         'xero',
         'account',
-        'amount',
-        'supplier',
         'linked',
         'reviewed',
         'invoice',
@@ -480,6 +481,8 @@ class ExpenseLineReview extends Component
                 'reviewed_at' => now(),
             ]
         );
+
+        $this->queueXeroWriteback($sourceKind, $parentTransactionId, $lineItemId);
     }
 
     public function toggleReviewed(string $sourceKind, string $parentTransactionId, string $lineItemId, bool $value): void
@@ -537,6 +540,8 @@ class ExpenseLineReview extends Component
                 'reviewed_at' => now(),
             ]
         );
+
+        $this->queueXeroWriteback($sourceKind, $parentTransactionId, $lineItemId);
     }
 
     public function updateNotes(string $sourceKind, string $parentTransactionId, string $lineItemId, string $notes): void
@@ -563,6 +568,20 @@ class ExpenseLineReview extends Component
                 'reviewed_at' => now(),
             ]
         );
+
+        $this->queueXeroWriteback($sourceKind, $parentTransactionId, $lineItemId);
+    }
+
+    private function queueXeroWriteback(string $sourceKind, string $parentTransactionId, string $lineItemId): void
+    {
+        PushLineReviewToXeroJob::dispatch(
+            $this->organisation->id,
+            $sourceKind,
+            $parentTransactionId,
+            $lineItemId,
+        );
+
+        session()->flash('status', __('Your changes will be sent to Xero shortly.'));
     }
 
     private function validateExpenseLineExistsForReview(string $sourceKind, string $parentTransactionId, string $lineItemId): void

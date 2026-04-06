@@ -77,6 +77,7 @@ class ExpenseLineReviewListQuery
                 'lr.needs_invoicing',
                 'lr.selected_contact_id',
                 'lr.notes',
+                'lr.xero_push_error',
                 'xc_sel.name as selected_contact_name',
             ])
             ->orderBy($this->sortSqlColumn($criteria->sortColumn), $this->sortDirectionSql($criteria->sortDirection))

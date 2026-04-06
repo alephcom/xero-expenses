@@ -428,6 +428,14 @@ class XeroSyncService
         return Carbon::parse($value);
     }
 
+    /**
+     * Re-fetch billable expense links from Xero and replace local rows for this organisation.
+     */
+    public function refreshLinkedTransactionsForOrganisation(Organisation $organisation): void
+    {
+        $this->replaceLinkedTransactionLines($organisation);
+    }
+
     private function replaceLinkedTransactionLines(Organisation $organisation): void
     {
         LinkedTransactionLine::withoutGlobalScopes()->where('organisation_id', $organisation->id)->delete();
@@ -440,17 +448,19 @@ class XeroSyncService
                 break;
             }
             foreach ($list as $lt) {
+                $linkId = $lt['LinkedTransactionID'] ?? null;
                 $st = $lt['SourceTransactionID'] ?? null;
                 $sl = $lt['SourceLineItemID'] ?? null;
-                $contact = $lt['ContactID'] ?? null;
-                if (! $st || ! $sl || ! $contact) {
+                if (! $linkId || ! $st || ! $sl) {
                     continue;
                 }
+                $contact = $lt['ContactID'] ?? null;
                 $rows[] = [
                     'organisation_id' => $organisation->id,
+                    'xero_linked_transaction_id' => (string) $linkId,
                     'source_transaction_id' => (string) $st,
                     'source_line_item_id' => (string) $sl,
-                    'contact_id' => (string) $contact,
+                    'contact_id' => $contact !== null && $contact !== '' ? (string) $contact : null,
                     'created_at' => now(),
                     'updated_at' => now(),
                 ];
