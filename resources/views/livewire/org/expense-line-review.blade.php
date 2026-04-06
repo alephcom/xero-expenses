@@ -48,6 +48,12 @@
                 </div>
             @endif
 
+            @if (session('billable_expense_locked'))
+                <div class="rounded-md bg-amber-50 p-4 text-sm text-amber-900" role="status">
+                    {{ session('billable_expense_locked') }}
+                </div>
+            @endif
+
             @if ($activeSyncRun && in_array($activeSyncRun->status, ['queued', 'running'], true))
                 <div class="rounded-md border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-950" role="status" aria-live="polite">
                     <p class="font-medium">{{ __('Sync in progress') }}</p>
@@ -256,6 +262,7 @@
                                     $detailRowClass = $g['stripe'] === 0 ? 'bg-indigo-50/50' : 'bg-gray-50';
                                     $leadCellBorder = 'border-l-4 border-indigo-400';
                                     $lineBlockEndBorder = $rowExpanded ? '' : 'border-b border-gray-200';
+                                    $billableLocked = ! empty($row->billable_link_target_transaction_id);
                                 @endphp
                                 <tr
                                     wire:key="el-{{ $row->source_kind }}-{{ $row->parent_transaction_id }}-{{ $row->line_item_id }}"
@@ -336,6 +343,9 @@
                                                     @else
                                                         <span class="text-gray-400">—</span>
                                                     @endif
+                                                    @if ($billableLocked)
+                                                        <p class="text-xs text-amber-800 mt-1">{{ __('Invoiced in Xero') }}</p>
+                                                    @endif
                                                 </td>
                                                 @break
                                             @case('reviewed')
@@ -352,15 +362,22 @@
                                                 <td class="px-3 py-2 text-center align-top">
                                                     <input
                                                         type="checkbox"
-                                                        class="rounded border-gray-300 text-indigo-600 shadow-sm focus:ring-indigo-500"
+                                                        class="rounded border-gray-300 text-indigo-600 shadow-sm focus:ring-indigo-500 disabled:opacity-50"
                                                         @checked($row->needs_invoicing)
+                                                        @if ($billableLocked) disabled title="{{ __('This line is already on a sales invoice in Xero.') }}" @endif
                                                         wire:change="toggleNeedsInvoicing(@js($row->source_kind), @js($row->parent_transaction_id), @js($row->line_item_id), $event.target.checked)"
                                                     />
                                                 </td>
                                                 @break
                                             @case('invoice_to')
                                                 <td class="px-3 py-2 align-top max-w-[10rem]">
-                                                    @if ($row->selected_contact_name)
+                                                    @if ($billableLocked)
+                                                        @if ($row->selected_contact_name)
+                                                            <div class="truncate text-gray-700" title="{{ $row->selected_contact_name }}">{{ $row->selected_contact_name }}</div>
+                                                        @else
+                                                            <span class="text-gray-400">—</span>
+                                                        @endif
+                                                    @elseif ($row->selected_contact_name)
                                                         <div class="truncate text-gray-700" title="{{ $row->selected_contact_name }}">{{ $row->selected_contact_name }}</div>
                                                     @else
                                                         <button
@@ -416,74 +433,79 @@
                                                 </div>
                                                 <div class="relative min-w-0">
                                                     <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">{{ __('Invoice to') }}</p>
-                                                    <div
-                                                        class="relative max-w-xl"
-                                                        x-data="{
-                                                            open: false,
-                                                            q: '',
-                                                            selectedId: @js((string) ($row->selected_contact_id ?? '')),
-                                                            label: @js($row->selected_contact_name ?? ''),
-                                                            init() {
-                                                                this.q = this.label || '';
-                                                            },
-                                                            get filtered() {
-                                                                const store = Alpine.store('xeroExpReviewContacts');
-                                                                const list = store && store.list ? store.list : [];
-                                                                const needle = (this.q || '').toLowerCase();
-                                                                return list.filter(c => (c.name || '').toLowerCase().includes(needle)).slice(0, 80);
-                                                            },
-                                                            pick(c) {
-                                                                this.selectedId = c.id;
-                                                                this.label = c.name;
-                                                                this.q = c.name;
-                                                                this.open = false;
-                                                                $wire.updateSelectedContact(@js($row->source_kind), @js($row->parent_transaction_id), @js($row->line_item_id), c.id);
-                                                            },
-                                                            clearSelection() {
-                                                                this.selectedId = '';
-                                                                this.label = '';
-                                                                this.q = '';
-                                                                this.open = false;
-                                                                $wire.updateSelectedContact(@js($row->source_kind), @js($row->parent_transaction_id), @js($row->line_item_id), '');
-                                                            },
-                                                        }"
-                                                        @click.outside="open = false"
-                                                    >
-                                                        <div class="flex gap-1">
-                                                            <input
-                                                                type="text"
-                                                                class="block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm text-sm bg-white"
-                                                                x-model="q"
-                                                                @focus="open = true"
-                                                                @keydown.escape.prevent="open = false"
-                                                                autocomplete="off"
-                                                                placeholder="{{ __('Search contacts…') }}"
-                                                            />
-                                                            <button
-                                                                type="button"
-                                                                class="shrink-0 px-2 py-1 text-xs text-gray-500 border border-gray-300 rounded-md hover:bg-gray-50 bg-white"
-                                                                @click="clearSelection()"
-                                                                title="{{ __('Clear') }}"
-                                                            >×</button>
-                                                        </div>
-                                                        <ul
-                                                            x-show="open"
-                                                            x-cloak
-                                                            class="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg"
+                                                    @if ($billableLocked)
+                                                        <p class="text-sm text-gray-700">{{ $row->selected_contact_name ?: '—' }}</p>
+                                                        <p class="text-xs text-amber-800 mt-2">{{ __('This expense is already on a sales invoice in Xero. Invoice-to cannot be changed here.') }}</p>
+                                                    @else
+                                                        <div
+                                                            class="relative max-w-xl"
+                                                            x-data="{
+                                                                open: false,
+                                                                q: '',
+                                                                selectedId: @js((string) ($row->selected_contact_id ?? '')),
+                                                                label: @js($row->selected_contact_name ?? ''),
+                                                                init() {
+                                                                    this.q = this.label || '';
+                                                                },
+                                                                get filtered() {
+                                                                    const store = Alpine.store('xeroExpReviewContacts');
+                                                                    const list = store && store.list ? store.list : [];
+                                                                    const needle = (this.q || '').toLowerCase();
+                                                                    return list.filter(c => (c.name || '').toLowerCase().includes(needle)).slice(0, 80);
+                                                                },
+                                                                pick(c) {
+                                                                    this.selectedId = c.id;
+                                                                    this.label = c.name;
+                                                                    this.q = c.name;
+                                                                    this.open = false;
+                                                                    $wire.updateSelectedContact(@js($row->source_kind), @js($row->parent_transaction_id), @js($row->line_item_id), c.id);
+                                                                },
+                                                                clearSelection() {
+                                                                    this.selectedId = '';
+                                                                    this.label = '';
+                                                                    this.q = '';
+                                                                    this.open = false;
+                                                                    $wire.updateSelectedContact(@js($row->source_kind), @js($row->parent_transaction_id), @js($row->line_item_id), '');
+                                                                },
+                                                            }"
+                                                            @click.outside="open = false"
                                                         >
-                                                            <template x-for="c in filtered" :key="c.id">
-                                                                <li>
-                                                                    <button
-                                                                        type="button"
-                                                                        class="w-full px-3 py-1.5 text-left text-sm hover:bg-indigo-50"
-                                                                        x-text="c.name"
-                                                                        @click="pick(c)"
-                                                                    ></button>
-                                                                </li>
-                                                            </template>
-                                                            <li x-show="filtered.length === 0" class="px-3 py-2 text-xs text-gray-500">{{ __('No matches') }}</li>
-                                                        </ul>
-                                                    </div>
+                                                            <div class="flex gap-1">
+                                                                <input
+                                                                    type="text"
+                                                                    class="block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm text-sm bg-white"
+                                                                    x-model="q"
+                                                                    @focus="open = true"
+                                                                    @keydown.escape.prevent="open = false"
+                                                                    autocomplete="off"
+                                                                    placeholder="{{ __('Search contacts…') }}"
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    class="shrink-0 px-2 py-1 text-xs text-gray-500 border border-gray-300 rounded-md hover:bg-gray-50 bg-white"
+                                                                    @click="clearSelection()"
+                                                                    title="{{ __('Clear') }}"
+                                                                >×</button>
+                                                            </div>
+                                                            <ul
+                                                                x-show="open"
+                                                                x-cloak
+                                                                class="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg"
+                                                            >
+                                                                <template x-for="c in filtered" :key="c.id">
+                                                                    <li>
+                                                                        <button
+                                                                            type="button"
+                                                                            class="w-full px-3 py-1.5 text-left text-sm hover:bg-indigo-50"
+                                                                            x-text="c.name"
+                                                                            @click="pick(c)"
+                                                                        ></button>
+                                                                    </li>
+                                                                </template>
+                                                                <li x-show="filtered.length === 0" class="px-3 py-2 text-xs text-gray-500">{{ __('No matches') }}</li>
+                                                            </ul>
+                                                        </div>
+                                                    @endif
                                                 </div>
                                                 <div>
                                                     <label for="notes-{{ $row->id }}" class="block text-xs font-medium text-gray-500 uppercase tracking-wide">{{ __('Notes') }}</label>

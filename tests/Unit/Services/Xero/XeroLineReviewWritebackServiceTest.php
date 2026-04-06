@@ -162,6 +162,77 @@ class XeroLineReviewWritebackServiceTest extends TestCase
         });
     }
 
+    public function test_push_does_not_delete_linked_transaction_when_target_transaction_present(): void
+    {
+        $parentId = (string) Str::uuid();
+        $lineId = (string) Str::uuid();
+        $contactId = (string) Str::uuid();
+        $linkId = (string) Str::uuid();
+        $targetId = (string) Str::uuid();
+
+        $org = Organisation::create([
+            'name' => 'Target Org',
+            'slug' => 'target-org',
+            'xero_tenant_id' => (string) Str::uuid(),
+        ]);
+
+        XeroConnection::withoutGlobalScopes()->create([
+            'organisation_id' => $org->id,
+            'access_token' => 'test-access',
+            'refresh_token' => 'test-refresh',
+            'expires_at' => now()->addHour(),
+            'token_type' => 'Bearer',
+        ]);
+
+        DB::table('expense_lines')->insert([
+            'organisation_id' => $org->id,
+            'source_kind' => 'spend',
+            'parent_transaction_id' => $parentId,
+            'line_item_id' => $lineId,
+            'occurred_on' => now()->toDateString(),
+            'line_amount' => 10,
+            'currency_code' => 'USD',
+            'account_id' => null,
+            'account_code' => '4000',
+            'description' => 'Tea',
+            'parent_reference' => 'R2',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $review = LineReview::withoutGlobalScopes()->create([
+            'organisation_id' => $org->id,
+            'source_kind' => 'spend',
+            'parent_transaction_id' => $parentId,
+            'line_item_id' => $lineId,
+            'needs_invoicing' => false,
+            'is_reviewed' => false,
+            'selected_contact_id' => $contactId,
+            'notes' => null,
+        ]);
+
+        Http::fake([
+            '*' => Http::sequence()
+                ->push(['LinkedTransactions' => [[
+                    'LinkedTransactionID' => $linkId,
+                    'SourceTransactionID' => $parentId,
+                    'SourceLineItemID' => $lineId,
+                    'SourceTransactionTypeCode' => 'SPEND',
+                    'ContactID' => $contactId,
+                    'TargetTransactionID' => $targetId,
+                ]]])
+                ->push(['LinkedTransactions' => []]),
+        ]);
+
+        $service = app(XeroLineReviewWritebackService::class);
+        $service->push($org->fresh(), $review->fresh());
+
+        Http::assertNotSent(function (Request $request): bool {
+            return $request->method() === 'DELETE'
+                && str_contains($request->url(), 'LinkedTransactions');
+        });
+    }
+
     public function test_push_puts_history_when_notes_present(): void
     {
         $parentId = (string) Str::uuid();

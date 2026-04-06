@@ -71,6 +71,7 @@ class ExpenseLineReviewListQuery
                 'xa.name as account_name',
                 'xc_parent.name as parent_contact_name',
                 'ltl.contact_id as linked_contact_id',
+                'ltl.target_transaction_id as billable_link_target_transaction_id',
                 'xc_link.name as linked_contact_name',
                 'lr.id as review_id',
                 'lr.is_reviewed as is_reviewed',

@@ -6,6 +6,7 @@ use App\Jobs\PushLineReviewToXeroJob;
 use App\Jobs\SyncXeroOrganisationJob;
 use App\Models\ExpenseLine;
 use App\Models\LineReview;
+use App\Models\LinkedTransactionLine;
 use App\Models\Organisation;
 use App\Models\SyncRun;
 use App\Models\XeroContact;
@@ -468,6 +469,12 @@ class ExpenseLineReview extends Component
 
         $this->validateExpenseLineExistsForReview($sourceKind, $parentTransactionId, $lineItemId);
 
+        if ($this->billableExpenseLinkIsAllocatedInXeroMirror($parentTransactionId, $lineItemId)) {
+            session()->flash('billable_expense_locked', __('This line is already invoiced in Xero. Billable link settings cannot be changed here.'));
+
+            return;
+        }
+
         LineReview::withoutGlobalScopes()->updateOrCreate(
             [
                 'organisation_id' => $this->organisation->id,
@@ -527,6 +534,12 @@ class ExpenseLineReview extends Component
             )->validate();
         }
 
+        if ($this->billableExpenseLinkIsAllocatedInXeroMirror($parentTransactionId, $lineItemId)) {
+            session()->flash('billable_expense_locked', __('This line is already invoiced in Xero. Billable link settings cannot be changed here.'));
+
+            return;
+        }
+
         LineReview::withoutGlobalScopes()->updateOrCreate(
             [
                 'organisation_id' => $this->organisation->id,
@@ -582,6 +595,16 @@ class ExpenseLineReview extends Component
         );
 
         session()->flash('status', __('Your changes will be sent to Xero shortly.'));
+    }
+
+    private function billableExpenseLinkIsAllocatedInXeroMirror(string $parentTransactionId, string $lineItemId): bool
+    {
+        return LinkedTransactionLine::withoutGlobalScopes()
+            ->where('organisation_id', $this->organisation->id)
+            ->where('source_transaction_id', $parentTransactionId)
+            ->where('source_line_item_id', $lineItemId)
+            ->whereNotNull('target_transaction_id')
+            ->exists();
     }
 
     private function validateExpenseLineExistsForReview(string $sourceKind, string $parentTransactionId, string $lineItemId): void

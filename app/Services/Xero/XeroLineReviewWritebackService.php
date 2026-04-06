@@ -40,6 +40,10 @@ class XeroLineReviewWritebackService
             $typeCode,
         );
 
+        if ($this->linkedTransactionPayloadHasTarget($existing)) {
+            return;
+        }
+
         if (! $review->needs_invoicing) {
             if ($existing !== null) {
                 $linkId = (string) ($existing['LinkedTransactionID'] ?? '');
@@ -82,6 +86,20 @@ class XeroLineReviewWritebackService
             'LinkedTransactionID' => $linkId,
             'ContactID' => $contactId,
         ]);
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $linkedTransaction
+     */
+    private function linkedTransactionPayloadHasTarget(?array $linkedTransaction): bool
+    {
+        if ($linkedTransaction === null) {
+            return false;
+        }
+
+        $target = $linkedTransaction['TargetTransactionID'] ?? null;
+
+        return $target !== null && $target !== '';
     }
 
     /**

@@ -16,6 +16,8 @@ class LinkedTransactionLine extends Model
         'source_transaction_id',
         'source_line_item_id',
         'contact_id',
+        'target_transaction_id',
+        'target_line_item_id',
     ];
 
     public function organisation(): BelongsTo
