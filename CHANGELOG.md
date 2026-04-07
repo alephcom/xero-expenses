@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SPEND sync excludes deleted bank transactions:** Bank transaction requests use `Status=="AUTHORISED"` so Xero `DELETED` spend rows are not imported or shown in review.
+
+- **ACCPAY sync excludes deleted and voided bills:** Invoice list queries restrict to `DRAFT`, `SUBMITTED`, `AUTHORISED`, and `PAID`; `DELETED` and `VOIDED` are omitted (with an extra skip if the API ever returns them).
+
 - **Lock billable edits when invoiced in Xero:** Linked transactions that include a `TargetTransactionID` (allocated to a sales invoice) are stored locally; reconcile sets `needs_invoicing` false, the review UI disables invoice and invoice-to controls, and write-back skips creating, updating, or deleting those links (API payloads with a target are never mutated).
 
 - **Invoice checkbox when already linked in Xero:** If a billable link includes a customer and is not yet on a sales invoice, the “needs invoicing” checkbox stays on and cannot be turned off here (matching Xero); clearing it requires changing the link in Xero.

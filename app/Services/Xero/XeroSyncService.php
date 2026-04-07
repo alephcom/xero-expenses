@@ -249,7 +249,7 @@ class XeroSyncService
         array $expenseAccountIds,
         array &$rows,
     ): void {
-        $where = 'Type=="SPEND"&&'.$this->xeroDateWhere($dateFrom, $dateTo);
+        $where = $this->bankTransactionsSpendWhere($dateFrom, $dateTo);
 
         for ($page = 1; ; $page++) {
             $json = $this->client->get($organisation, 'BankTransactions', [
@@ -299,7 +299,7 @@ class XeroSyncService
         array $expenseAccountIds,
         array &$rows,
     ): void {
-        $where = 'Type=="ACCPAY"&&'.$this->xeroDateWhere($dateFrom, $dateTo);
+        $where = $this->invoicesAccpayWhere($dateFrom, $dateTo);
 
         for ($page = 1; ; $page++) {
             $json = $this->client->get($organisation, 'Invoices', [
@@ -313,6 +313,10 @@ class XeroSyncService
             foreach ($list as $inv) {
                 $parentId = $inv['InvoiceID'] ?? null;
                 if (! $parentId) {
+                    continue;
+                }
+                $status = isset($inv['Status']) ? (string) $inv['Status'] : '';
+                if ($status === 'DELETED' || $status === 'VOIDED') {
                     continue;
                 }
                 $date = isset($inv['Date']) ? $this->parseXeroDate($inv['Date'])->toDateString() : $dateFrom->toDateString();
@@ -405,6 +409,28 @@ class XeroSyncService
         $id = $item['LineItemID'] ?? $item['LineItemId'] ?? null;
 
         return $id ? (string) $id : null;
+    }
+
+    /**
+     * Xero bank transactions are AUTHORISED or DELETED; exclude deleted from sync and UI.
+     *
+     * @see https://developer.xero.com/documentation/api/accounting/banktransactions
+     */
+    private function bankTransactionsSpendWhere(Carbon $dateFrom, Carbon $dateTo): string
+    {
+        return 'Type=="SPEND"&&Status=="AUTHORISED"&&'.$this->xeroDateWhere($dateFrom, $dateTo);
+    }
+
+    /**
+     * ACCPAY invoices: include normal lifecycle statuses; omit DELETED and VOIDED per Xero invoice statuses.
+     *
+     * @see https://developer.xero.com/documentation/api/accounting/invoices
+     */
+    private function invoicesAccpayWhere(Carbon $dateFrom, Carbon $dateTo): string
+    {
+        $statuses = '(Status=="DRAFT"||Status=="SUBMITTED"||Status=="AUTHORISED"||Status=="PAID")';
+
+        return 'Type=="ACCPAY"&&'.$statuses.'&&'.$this->xeroDateWhere($dateFrom, $dateTo);
     }
 
     private function xeroDateWhere(Carbon $from, Carbon $to): string
