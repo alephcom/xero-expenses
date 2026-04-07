@@ -476,12 +476,6 @@ class ExpenseLineReview extends Component
             return;
         }
 
-        if (! $value && $this->billableExpenseHasOpenCustomerLinkInXeroMirror($parentTransactionId, $lineItemId)) {
-            session()->flash('billable_expense_locked', __('This expense is already linked to a customer in Xero. Remove or change the link in Xero if you no longer want it billable.'));
-
-            return;
-        }
-
         LineReview::withoutGlobalScopes()->updateOrCreate(
             [
                 'organisation_id' => $this->organisation->id,
@@ -611,17 +605,6 @@ class ExpenseLineReview extends Component
             ->where('source_transaction_id', $parentTransactionId)
             ->where('source_line_item_id', $lineItemId)
             ->whereNotNull('target_transaction_id')
-            ->exists();
-    }
-
-    private function billableExpenseHasOpenCustomerLinkInXeroMirror(string $parentTransactionId, string $lineItemId): bool
-    {
-        return LinkedTransactionLine::withoutGlobalScopes()
-            ->where('organisation_id', $this->organisation->id)
-            ->where('source_transaction_id', $parentTransactionId)
-            ->where('source_line_item_id', $lineItemId)
-            ->whereNotNull('contact_id')
-            ->whereNull('target_transaction_id')
             ->exists();
     }
 

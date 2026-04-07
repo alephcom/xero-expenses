@@ -270,8 +270,8 @@
                                     $lineBlockEndBorder = $rowExpanded ? '' : 'border-b border-gray-200';
                                     $billableLocked = ! empty($row->billable_link_target_transaction_id);
                                     $openBillableCustomerLinkInXero = ! empty($row->linked_contact_id) && empty($row->billable_link_target_transaction_id);
-                                    $invoiceCheckboxLocked = $billableLocked || $openBillableCustomerLinkInXero;
-                                    $invoiceCheckboxChecked = $billableLocked || (bool) $row->needs_invoicing || $openBillableCustomerLinkInXero;
+                                    $invoiceCheckboxLocked = $billableLocked;
+                                    $invoiceCheckboxChecked = $billableLocked || (bool) $row->needs_invoicing;
                                 @endphp
                                 <tr
                                     wire:key="el-{{ $row->source_kind }}-{{ $row->parent_transaction_id }}-{{ $row->line_item_id }}"
@@ -377,7 +377,7 @@
                                                         @checked($invoiceCheckboxChecked)
                                                         @if ($invoiceCheckboxLocked)
                                                             disabled
-                                                            title="{{ $billableLocked ? __('This line is already on a sales invoice in Xero.') : __('This expense is already linked to a customer in Xero.') }}"
+                                                            title="{{ __('This line is already on a sales invoice in Xero.') }}"
                                                         @endif
                                                         wire:change="toggleNeedsInvoicing(@js($row->source_kind), @js($row->parent_transaction_id), @js($row->line_item_id), $event.target.checked)"
                                                     />

@@ -803,7 +803,7 @@ class ExpenseLineReviewTest extends TestCase
         );
     }
 
-    public function test_toggle_needs_invoicing_off_blocked_when_open_customer_link_in_xero_mirror(): void
+    public function test_toggle_needs_invoicing_off_queues_writeback_when_open_customer_link_in_xero_mirror(): void
     {
         Queue::fake();
 
@@ -866,11 +866,96 @@ class ExpenseLineReviewTest extends TestCase
             ->call('toggleNeedsInvoicing', 'spend', $parentId, $lineId, false)
             ->assertHasNoErrors();
 
-        Queue::assertNotPushed(PushLineReviewToXeroJob::class);
+        Queue::assertPushed(PushLineReviewToXeroJob::class, function (PushLineReviewToXeroJob $job) use ($org, $parentId, $lineId): bool {
+            return $job->organisationId === $org->id
+                && $job->sourceKind === 'spend'
+                && $job->parentTransactionId === $parentId
+                && $job->lineItemId === $lineId;
+        });
 
         $review = LineReview::withoutGlobalScopes()->where('organisation_id', $org->id)->first();
         $this->assertNotNull($review);
-        $this->assertTrue($review->needs_invoicing);
+        $this->assertFalse($review->needs_invoicing);
+    }
+
+    public function test_invoice_checkbox_not_disabled_when_open_customer_link_only(): void
+    {
+        $user = User::factory()->create();
+        $org = Organisation::create([
+            'name' => 'Open Link UI Org',
+            'slug' => 'open-link-ui-org',
+            'xero_tenant_id' => (string) Str::uuid(),
+        ]);
+        $org->users()->attach($user->id, ['role' => 'admin']);
+
+        $parentId = (string) Str::uuid();
+        $lineId = (string) Str::uuid();
+        $contactId = (string) Str::uuid();
+        $day = Carbon::now()->subDay()->toDateString();
+
+        DB::table('expense_lines')->insert([
+            'organisation_id' => $org->id,
+            'source_kind' => 'spend',
+            'parent_transaction_id' => $parentId,
+            'line_item_id' => $lineId,
+            'occurred_on' => $day,
+            'line_amount' => 1,
+            'currency_code' => 'USD',
+            'account_id' => null,
+            'account_code' => '4000',
+            'description' => 'Open link line',
+            'parent_reference' => 'R',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('linked_transaction_lines')->insert([
+            'organisation_id' => $org->id,
+            'xero_linked_transaction_id' => (string) Str::uuid(),
+            'source_transaction_id' => $parentId,
+            'source_line_item_id' => $lineId,
+            'contact_id' => $contactId,
+            'target_transaction_id' => null,
+            'target_line_item_id' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('xero_contacts')->insert([
+            'organisation_id' => $org->id,
+            'xero_contact_id' => $contactId,
+            'name' => 'Billable Customer',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        LineReview::withoutGlobalScopes()->create([
+            'organisation_id' => $org->id,
+            'source_kind' => 'spend',
+            'parent_transaction_id' => $parentId,
+            'line_item_id' => $lineId,
+            'needs_invoicing' => true,
+            'is_reviewed' => false,
+            'selected_contact_id' => $contactId,
+            'notes' => null,
+        ]);
+
+        $html = Livewire::actingAs($user)
+            ->test(ExpenseLineReview::class, ['organisation' => $org])
+            ->set('dateFrom', $day)
+            ->set('dateTo', $day)
+            ->set('columnToggles', array_values(array_unique(array_merge(
+                ExpenseLineReview::defaultColumnToggles(),
+                ['invoice'],
+            ))))
+            ->html();
+
+        $this->assertSame(1, preg_match('/<input\b[^>]*\bwire:change="toggleNeedsInvoicing[^"]*"[^>]*>/s', $html, $m));
+        $this->assertSame(
+            0,
+            preg_match('/\sdisabled(?=[\s\n>])/', $m[0]),
+            'Invoice checkbox should stay enabled when the billable link is not on a sales invoice (ignore Tailwind disabled:opacity in class).'
+        );
     }
 
     public function test_update_selected_contact_does_not_run_when_link_allocated_in_xero_mirror(): void
