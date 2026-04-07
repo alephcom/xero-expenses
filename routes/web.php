@@ -3,6 +3,7 @@
 use App\Http\Controllers\Xero\XeroCallbackController;
 use App\Http\Controllers\XeroOAuthController;
 use App\Livewire\Org\ExpenseLineReview;
+use App\Queries\ExpenseReview\OrganisationExpenseTotalsQuery;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -13,10 +14,13 @@ Route::get('/dashboard', function () {
     $user = auth()->user();
     $organisations = $user->organisations()->orderBy('name')->get();
     $canConnectXero = $user->canConnectXero();
+    $organisationExpenseTotals = app(OrganisationExpenseTotalsQuery::class)
+        ->forOrganisationIds($organisations->pluck('id')->all());
 
     return view('dashboard', [
         'organisations' => $organisations,
         'canConnectXero' => $canConnectXero,
+        'organisationExpenseTotals' => $organisationExpenseTotals,
     ]);
 })->middleware(['auth', 'verified'])->name('dashboard');
 

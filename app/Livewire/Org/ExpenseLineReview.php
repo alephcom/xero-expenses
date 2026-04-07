@@ -12,6 +12,7 @@ use App\Models\SyncRun;
 use App\Models\XeroContact;
 use App\Queries\ExpenseReview\ExpenseLineReviewListCriteria;
 use App\Queries\ExpenseReview\ExpenseLineReviewListQuery;
+use App\Queries\ExpenseReview\OrganisationExpenseTotalsQuery;
 use App\Services\Xero\XeroWebTransactionUrl;
 use App\Support\ExpenseReviewDatePresets;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -808,6 +809,9 @@ class ExpenseLineReview extends Component
         $data['tableColCount'] = $this->tableTotalColumnCount();
         $data['optionalColumnsForPicker'] = $this->optionalColumnsForPicker();
         $data['lineParentGroupMeta'] = self::buildParentGroupLineMeta($data['rows']->getCollection());
+
+        $data['organisationExpenseTotalsStats'] = app(OrganisationExpenseTotalsQuery::class)
+            ->forOrganisationIds([$this->organisation->id])[$this->organisation->id];
 
         return view('livewire.org.expense-line-review', $data);
     }

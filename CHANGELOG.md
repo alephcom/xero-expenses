@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Invoice checkbox when allocated in Xero:** Lines whose billable link already has a target transaction show the Invoice? checkbox as checked and disabled (reconcile still stores `needs_invoicing` false for “not pending”).
+
 - **SPEND sync excludes deleted bank transactions:** Bank transaction requests use `Status=="AUTHORISED"` so Xero `DELETED` spend rows are not imported or shown in review.
 
 - **ACCPAY sync excludes deleted and voided bills:** Invoice list queries restrict to `DRAFT`, `SUBMITTED`, `AUTHORISED`, and `PAID`; `DELETED` and `VOIDED` are omitted (with an extra skip if the API ever returns them).

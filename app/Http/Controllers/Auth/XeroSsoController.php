@@ -6,6 +6,7 @@ use App\Enums\OrganisationRole;
 use App\Http\Controllers\Controller;
 use App\Models\Invitation;
 use App\Models\User;
+use App\Services\Xero\XeroSsoOrganisationAccessService;
 use App\Services\Xero\XeroSsoService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -88,6 +89,11 @@ class XeroSsoController extends Controller
         $request->session()->regenerate();
 
         $invitationRedirect = $this->tryCompleteInvitationAfterSso($request, $user);
+
+        if (Auth::check()) {
+            app(XeroSsoOrganisationAccessService::class)->syncReviewerAccessFromXero($user->fresh());
+        }
+
         if ($invitationRedirect !== null) {
             return $invitationRedirect;
         }

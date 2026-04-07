@@ -41,6 +41,10 @@
                                         @if ($organisation->last_synced_at)
                                             <p class="text-xs text-gray-500 mt-1">{{ __('Last synced') }}: {{ $organisation->last_synced_at->timezone(config('app.timezone'))->toDayDateTimeString() }}</p>
                                         @endif
+                                        <x-organisation-expense-totals
+                                            class="mt-2"
+                                            :stats="$organisationExpenseTotals[$organisation->id] ?? []"
+                                        />
                                     </div>
                                     <a
                                         href="{{ route('orgs.expenses', $organisation) }}"

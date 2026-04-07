@@ -68,6 +68,12 @@
                 </div>
             @endif
 
+            <div class="bg-white shadow-sm sm:rounded-lg border border-gray-100 p-4 sm:p-6">
+                <p class="text-sm font-medium text-gray-900">{{ __('Organisation totals') }}</p>
+                <p class="text-xs text-gray-500 mt-0.5">{{ __('All synced expense lines (not limited to the period below).') }}</p>
+                <x-organisation-expense-totals class="mt-3" :stats="$organisationExpenseTotalsStats" />
+            </div>
+
             <div class="bg-white shadow-sm sm:rounded-lg p-4 sm:p-6">
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-8 gap-4">
                     <div>
@@ -265,7 +271,7 @@
                                     $billableLocked = ! empty($row->billable_link_target_transaction_id);
                                     $openBillableCustomerLinkInXero = ! empty($row->linked_contact_id) && empty($row->billable_link_target_transaction_id);
                                     $invoiceCheckboxLocked = $billableLocked || $openBillableCustomerLinkInXero;
-                                    $invoiceCheckboxChecked = (bool) $row->needs_invoicing || $openBillableCustomerLinkInXero;
+                                    $invoiceCheckboxChecked = $billableLocked || (bool) $row->needs_invoicing || $openBillableCustomerLinkInXero;
                                 @endphp
                                 <tr
                                     wire:key="el-{{ $row->source_kind }}-{{ $row->parent_transaction_id }}-{{ $row->line_item_id }}"

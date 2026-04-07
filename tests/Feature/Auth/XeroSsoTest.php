@@ -5,8 +5,11 @@ namespace Tests\Feature\Auth;
 use App\Models\Invitation;
 use App\Models\Organisation;
 use App\Models\User;
+use App\Models\XeroConnection;
+use App\Services\Xero\XeroApiClient;
 use App\Services\Xero\XeroSsoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Mockery;
 use Tests\TestCase;
 
@@ -173,6 +176,61 @@ class XeroSsoTest extends TestCase
         $this->assertNotNull($newUser);
         $this->assertTrue($newUser->organisations()->whereKey($organisation->id)->exists());
         $this->assertNotNull($created['invitation']->fresh()->accepted_at);
+    }
+
+    public function test_sso_callback_auto_attaches_reviewer_when_xero_users_lists_standard_user(): void
+    {
+        config(['services.xero.allow_open_signup' => true]);
+
+        $organisation = Organisation::query()->create([
+            'name' => 'Linked org',
+            'slug' => 'linked-'.Str::lower(Str::random(8)),
+            'xero_tenant_id' => 'tenant-sso-reviewer',
+        ]);
+        XeroConnection::query()->create([
+            'organisation_id' => $organisation->id,
+            'access_token' => 'access',
+            'refresh_token' => 'refresh',
+            'expires_at' => now()->addHour(),
+            'token_type' => 'Bearer',
+            'scopes' => 'offline_access',
+        ]);
+
+        $api = Mockery::mock(XeroApiClient::class);
+        $api->shouldReceive('get')
+            ->once()
+            ->with(Mockery::on(fn ($org) => $org->id === $organisation->id), 'Users')
+            ->andReturn([
+                'Users' => [
+                    ['EmailAddress' => 'auto@example.com', 'OrganisationRole' => 'STANDARD'],
+                ],
+            ]);
+        $this->app->instance(XeroApiClient::class, $api);
+
+        $sso = Mockery::mock(XeroSsoService::class);
+        $sso->shouldReceive('exchangeCode')
+            ->once()
+            ->with('auth-code')
+            ->andReturn(['id_token' => 'jwt-here']);
+        $sso->shouldReceive('verifyIdToken')
+            ->once()
+            ->with('jwt-here')
+            ->andReturn([
+                'sub' => 'xero-sub-auto',
+                'email' => 'auto@example.com',
+                'name' => 'Auto User',
+            ]);
+        $this->app->instance(XeroSsoService::class, $sso);
+
+        $this->withSession(['xero_sso_state' => 'good-state'])
+            ->get(route('xero.callback', ['code' => 'auth-code', 'state' => 'good-state']))
+            ->assertRedirect(route('dashboard', absolute: false));
+
+        $this->assertAuthenticated();
+        $user = User::query()->where('email', 'auto@example.com')->first();
+        $this->assertNotNull($user);
+        $this->assertTrue($user->organisations()->whereKey($organisation->id)->exists());
+        $this->assertSame('reviewer', $user->organisations()->whereKey($organisation->id)->first()->pivot->role);
     }
 
     protected function tearDown(): void
