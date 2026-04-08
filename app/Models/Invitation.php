@@ -77,4 +77,45 @@ class Invitation extends Model
     {
         return $query->whereNull('accepted_at')->where('expires_at', '>', now());
     }
+
+    public function scopeExpiredUnaccepted(Builder $query): Builder
+    {
+        return $query->whereNull('accepted_at')->where('expires_at', '<=', now());
+    }
+
+    public function scopeAccepted(Builder $query): Builder
+    {
+        return $query->whereNotNull('accepted_at');
+    }
+
+    /**
+     * @return 'accepted'|'expired'|'pending'
+     */
+    public function statusForDisplay(): string
+    {
+        if ($this->accepted_at !== null) {
+            return 'accepted';
+        }
+
+        return $this->expires_at->isFuture() ? 'pending' : 'expired';
+    }
+
+    /**
+     * @throws \InvalidArgumentException
+     */
+    public function regenerateTokenForResend(User $actor): string
+    {
+        if ($this->accepted_at !== null) {
+            throw new \InvalidArgumentException('Cannot resend an accepted invitation.');
+        }
+
+        $plain = Str::random(48);
+        $this->forceFill([
+            'token_hash' => static::hashToken($plain),
+            'expires_at' => now()->addDays(7),
+            'invited_by' => $actor->id,
+        ])->save();
+
+        return $plain;
+    }
 }

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Dashboard team management for org admins:** On the dashboard, admins can list invitations (pending, expired, accepted), resend or revoke outstanding invites, and list members with role changes or removal, while keeping at least one admin per organisation.
+
 - **Invoice checkbox when allocated in Xero:** Lines whose billable link already has a target transaction show the Invoice? checkbox as checked and disabled (reconcile still stores `needs_invoicing` false for “not pending”).
 
 - **SPEND sync excludes deleted bank transactions:** Bank transaction requests use `Status=="AUTHORISED"` so Xero `DELETED` spend rows are not imported or shown in review.
@@ -21,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Invoice flag from Xero:** After linked transactions are synced, any expense line with a billable link that includes a customer in Xero gets `needs_invoicing` and `selected_contact_id` updated to match. Existing notes and reviewed state on a line review are left unchanged when reconciling.
 
 ### Changed
+
+- **Dashboard invitations UI:** The separate invite-only Livewire block is replaced by **Team and invitations** (`ManageOrganisationTeam`), which keeps sending invites and adds invitation and member management for admins.
 
 - **Invoice? for open billable links:** If a line is linked to a customer in Xero but not yet on a sales invoice, the Invoice? checkbox remains enabled. Unchecking clears `needs_invoicing` and write-back deletes the Xero linked transaction (removing the customer link).
 

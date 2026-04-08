@@ -62,7 +62,7 @@
 
             <div class="bg-white shadow-sm sm:rounded-lg">
                 <div class="p-6">
-                    <livewire:dashboard.invite-organisation-member />
+                    <livewire:dashboard.manage-organisation-team />
                 </div>
             </div>
         </div>

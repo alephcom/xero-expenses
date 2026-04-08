@@ -2,7 +2,7 @@
 
 namespace Tests\Feature\Auth;
 
-use App\Livewire\Dashboard\InviteOrganisationMember;
+use App\Livewire\Dashboard\ManageOrganisationTeam;
 use App\Models\Invitation;
 use App\Models\Organisation;
 use App\Models\User;
@@ -31,7 +31,7 @@ class InvitationTest extends TestCase
         $org->users()->attach($user->id, ['role' => 'admin']);
 
         Livewire::actingAs($user)
-            ->test(InviteOrganisationMember::class)
+            ->test(ManageOrganisationTeam::class)
             ->set('organisationId', (string) $org->id)
             ->set('email', 'invitee@example.com')
             ->set('role', 'reviewer')
@@ -68,7 +68,7 @@ class InvitationTest extends TestCase
         $org->users()->attach($reviewer->id, ['role' => 'reviewer']);
 
         Livewire::actingAs($reviewer)
-            ->test(InviteOrganisationMember::class)
+            ->test(ManageOrganisationTeam::class)
             ->set('organisationId', (string) $org->id)
             ->set('email', 'invitee@example.com')
             ->set('role', 'reviewer')

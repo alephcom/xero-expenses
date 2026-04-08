@@ -61,6 +61,11 @@ class Organisation extends Model
         return $this->belongsToMany(User::class)->withPivot('role');
     }
 
+    public function invitations(): HasMany
+    {
+        return $this->hasMany(Invitation::class);
+    }
+
     public function xeroConnection(): HasOne
     {
         return $this->hasOne(XeroConnection::class);
