@@ -6,6 +6,24 @@
     display: none !important;
 }
 
+@layer components {
+    /* Light “paper” fields on dark marketing pages: dark text, readable autofill */
+    .luxury-form-field {
+        @apply w-full rounded-xl border border-ink/20 bg-cream px-4 py-2.5 text-sm text-ink shadow-sm;
+        @apply placeholder:text-zinc-500;
+        @apply focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/30;
+    }
+
+    .luxury-form-field:-webkit-autofill,
+    .luxury-form-field:-webkit-autofill:hover,
+    .luxury-form-field:-webkit-autofill:focus,
+    .luxury-form-field:-webkit-autofill:active {
+        -webkit-text-fill-color: #09090b;
+        box-shadow: 0 0 0 1000px #f0ebe3 inset;
+        transition: background-color 5000s ease-in-out 0s;
+    }
+}
+
 @layer utilities {
     .line-clamp-3 {
         display: -webkit-box;

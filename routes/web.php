@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ContactController;
 use App\Http\Controllers\Xero\XeroCallbackController;
 use App\Http\Controllers\XeroOAuthController;
 use App\Livewire\Org\ExpenseLineReview;
@@ -9,6 +10,11 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', function () {
     return view('welcome');
 });
+
+Route::get('/contact', [ContactController::class, 'create'])->name('contact');
+Route::post('/contact', [ContactController::class, 'store'])
+    ->middleware('throttle:5,1')
+    ->name('contact.store');
 
 Route::get('/dashboard', function () {
     $user = auth()->user();
