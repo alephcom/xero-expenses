@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Middleware\EnsureMinimumDuration;
 use App\Models\Organisation;
 use App\Models\SyncRun;
 use App\Models\User;
@@ -34,6 +35,14 @@ class SyncXeroOrganisationJob implements ShouldQueue
         public int $initiatedByUserId,
         public ?int $syncRunId = null,
     ) {}
+
+    /**
+     * @return array<int, object>
+     */
+    public function middleware(): array
+    {
+        return [new EnsureMinimumDuration];
+    }
 
     /**
      * @return array{dateFrom: string, dateTo: string}

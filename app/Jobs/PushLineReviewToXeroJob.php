@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Middleware\EnsureMinimumDuration;
 use App\Models\LineReview;
 use App\Models\Organisation;
 use App\Services\Xero\XeroLineReviewWritebackService;
@@ -20,6 +21,14 @@ class PushLineReviewToXeroJob implements ShouldQueue
         public string $parentTransactionId,
         public string $lineItemId,
     ) {}
+
+    /**
+     * @return array<int, object>
+     */
+    public function middleware(): array
+    {
+        return [new EnsureMinimumDuration];
+    }
 
     public function handle(XeroLineReviewWritebackService $writeback): void
     {
