@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\OrganisationMembershipSource;
 use App\Enums\OrganisationRole;
 use App\Models\Organisation;
 use App\Models\XeroConnection;
@@ -9,7 +10,9 @@ use App\Services\Xero\XeroOAuthService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 class XeroOAuthController extends Controller
 {
@@ -36,8 +39,14 @@ class XeroOAuthController extends Controller
             abort(403, 'Invalid OAuth state.');
         }
 
-        $tokens = $oauth->exchangeCode($request->string('code')->toString());
-        $connections = $oauth->fetchConnections($tokens['access_token']);
+        try {
+            $tokens = $oauth->exchangeCode($request->string('code')->toString());
+            $connections = $oauth->fetchConnections($tokens['access_token']);
+        } catch (Throwable $e) {
+            Log::warning('Xero connect token exchange failed', ['message' => $e->getMessage()]);
+
+            return redirect()->route('dashboard')->with('status', __('Could not connect to Xero. Please try again.'));
+        }
         $batchId = (string) Str::uuid();
 
         $linked = false;
@@ -70,7 +79,7 @@ class XeroOAuthController extends Controller
             if ($wasNew) {
                 $linked = true;
                 $org->users()->syncWithoutDetaching([
-                    $user->id => ['role' => OrganisationRole::Admin->value],
+                    $user->id => ['role' => OrganisationRole::Admin->value, 'source' => OrganisationMembershipSource::XeroConnect->value],
                 ]);
 
                 XeroConnection::withoutGlobalScopes()->updateOrCreate(
@@ -95,7 +104,10 @@ class XeroOAuthController extends Controller
 
             $linked = true;
             if (! $org->users()->where('users.id', $user->id)->exists()) {
-                $org->users()->attach($user->id, ['role' => OrganisationRole::Admin->value]);
+                $org->users()->attach($user->id, [
+                    'role' => OrganisationRole::Admin->value,
+                    'source' => OrganisationMembershipSource::XeroConnect->value,
+                ]);
             } else {
                 $org->users()->syncWithoutDetaching([$user->id]);
             }

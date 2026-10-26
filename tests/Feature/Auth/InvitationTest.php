@@ -5,6 +5,7 @@ namespace Tests\Feature\Auth;
 use App\Livewire\Dashboard\ManageOrganisationTeam;
 use App\Models\Invitation;
 use App\Models\Organisation;
+use App\Models\OrganisationAccessExclusion;
 use App\Models\User;
 use App\Notifications\InvitationNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -115,5 +116,34 @@ class InvitationTest extends TestCase
         $this->assertTrue($invitee->fresh()->organisations()->where('organisations.id', $org->id)->exists());
         $this->assertSame('reviewer', $invitee->fresh()->organisations()->where('organisations.id', $org->id)->first()->pivot->role);
         $this->assertNotNull($created['invitation']->fresh()->accepted_at);
+    }
+
+    public function test_accepting_invitation_lifts_earlier_removal(): void
+    {
+        $inviter = User::factory()->create();
+        $org = Organisation::create([
+            'name' => 'Acme',
+            'slug' => 'acme',
+            'xero_tenant_id' => (string) Str::uuid(),
+        ]);
+        $org->users()->attach($inviter->id, ['role' => 'admin']);
+        $invitee = User::factory()->create(['email' => 'back@example.com']);
+        OrganisationAccessExclusion::query()->create(['organisation_id' => $org->id, 'user_id' => $invitee->id]);
+
+        $created = Invitation::createWithPlainToken([
+            'email' => 'back@example.com',
+            'organisation_id' => $org->id,
+            'role' => 'reviewer',
+            'invited_by' => $inviter->id,
+            'expires_at' => now()->addDay(),
+        ]);
+
+        Volt::actingAs($invitee)->test('pages.auth.accept-invitation', ['token' => $created['plain_token']])
+            ->call('acceptAuthenticated')
+            ->assertHasNoErrors();
+
+        $membership = $invitee->fresh()->organisations()->where('organisations.id', $org->id)->first();
+        $this->assertSame('invitation', $membership->pivot->source);
+        $this->assertDatabaseMissing('organisation_access_exclusions', ['organisation_id' => $org->id, 'user_id' => $invitee->id]);
     }
 }

@@ -9,12 +9,12 @@ use App\Models\LineReview;
 use App\Models\LinkedTransactionLine;
 use App\Models\Organisation;
 use App\Models\SyncRun;
-use App\Models\XeroContact;
 use App\Queries\ExpenseReview\ExpenseLineReviewListCriteria;
 use App\Queries\ExpenseReview\ExpenseLineReviewListQuery;
 use App\Queries\ExpenseReview\OrganisationExpenseTotalsQuery;
 use App\Services\Xero\XeroWebTransactionUrl;
 use App\Support\ExpenseReviewDatePresets;
+use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Renderless;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -32,6 +33,8 @@ class ExpenseLineReview extends Component
     use WithPagination;
 
     public const MAX_NOTES_LENGTH = 4096;
+
+    public const MAX_SYNC_RANGE_DAYS = 366;
 
     public Organisation $organisation;
 
@@ -123,6 +126,8 @@ class ExpenseLineReview extends Component
 
     private function hydrateActiveSyncRunFromDatabase(): void
     {
+        SyncRun::failStaleRuns($this->organisation->id);
+
         $run = SyncRun::withoutGlobalScopes()
             ->where('organisation_id', $this->organisation->id)
             ->whereIn('status', [SyncRun::STATUS_QUEUED, SyncRun::STATUS_RUNNING])
@@ -387,6 +392,22 @@ class ExpenseLineReview extends Component
     public function requestSync(): void
     {
         $this->authorize('sync', $this->organisation);
+
+        if (! $this->isValidDateString($this->dateFrom)
+            || ! $this->isValidDateString($this->dateTo)
+            || $this->dateFrom > $this->dateTo) {
+            session()->flash('sync_status_warning', __('Choose a valid date range before syncing.'));
+
+            return;
+        }
+
+        if (Carbon::parse($this->dateFrom)->diffInDays(Carbon::parse($this->dateTo)) > self::MAX_SYNC_RANGE_DAYS) {
+            session()->flash('sync_status_warning', __('Sync up to :days days at a time.', ['days' => self::MAX_SYNC_RANGE_DAYS]));
+
+            return;
+        }
+
+        SyncRun::failStaleRuns($this->organisation->id);
 
         if (SyncRun::withoutGlobalScopes()
             ->where('organisation_id', $this->organisation->id)
@@ -726,18 +747,25 @@ class ExpenseLineReview extends Component
     }
 
     /**
-     * @return array{
-     *     rows: LengthAwarePaginator,
-     *     contacts: Collection<int, XeroContact>,
-     *     contactsForPicker: list<array{id: string, name: string}>
-     * }
+     * Loaded once by the page's Alpine store rather than embedded in every render (polling re-renders
+     * every two seconds during a sync, and organisations can have thousands of contacts).
+     *
+     * @return list<array{id: string, name: string}>
+     */
+    #[Renderless]
+    public function loadContactsForPicker(): array
+    {
+        $this->authorize('view', $this->organisation);
+
+        return resolve(ExpenseLineReviewListQuery::class)->contactsForPicker($this->organisation->id);
+    }
+
+    /**
+     * @return array{rows: LengthAwarePaginator}
      */
     protected function viewData(): array
     {
-        $listQuery = resolve(ExpenseLineReviewListQuery::class);
-        $orgId = $this->organisation->id;
-
-        $rows = $listQuery->paginate($this->listCriteria());
+        $rows = resolve(ExpenseLineReviewListQuery::class)->paginate($this->listCriteria());
 
         $keysOnPage = $rows->getCollection()
             ->map(fn (object $row): string => self::lineItemKey(
@@ -750,8 +778,6 @@ class ExpenseLineReview extends Component
 
         return [
             'rows' => $rows,
-            'contacts' => $listQuery->contactsForOrganisation($orgId),
-            'contactsForPicker' => $listQuery->contactsForPicker($orgId),
         ];
     }
 
