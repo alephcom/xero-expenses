@@ -368,6 +368,66 @@ class ExpenseLineReviewTest extends TestCase
         $this->assertSame(1, SyncRun::withoutGlobalScopes()->where('organisation_id', $org->id)->count());
     }
 
+    public function test_request_sync_replaces_stale_in_progress_run(): void
+    {
+        Queue::fake();
+
+        $user = User::factory()->create();
+        $org = Organisation::create([
+            'name' => 'Stale Org',
+            'slug' => 'stale-org',
+            'xero_tenant_id' => (string) Str::uuid(),
+        ]);
+        $org->users()->attach($user->id, ['role' => 'admin']);
+
+        $stale = SyncRun::withoutGlobalScopes()->create([
+            'organisation_id' => $org->id,
+            'status' => SyncRun::STATUS_RUNNING,
+            'started_at' => now()->subHour(),
+            'date_from' => '2026-02-01',
+            'date_to' => '2026-02-28',
+            'meta' => ['step' => 'contacts'],
+        ]);
+        DB::table('sync_runs')->where('id', $stale->id)->update(['updated_at' => now()->subHour()]);
+
+        Livewire::actingAs($user)
+            ->test(ExpenseLineReview::class, ['organisation' => $org])
+            ->assertSet('activeSyncRunId', null)
+            ->set('dateFrom', '2026-01-01')
+            ->set('dateTo', '2026-01-31')
+            ->call('requestSync');
+
+        $this->assertSame(SyncRun::STATUS_FAILED, $stale->fresh()->status);
+        Queue::assertPushed(SyncXeroOrganisationJob::class);
+    }
+
+    public function test_request_sync_rejects_invalid_or_oversized_date_range(): void
+    {
+        Queue::fake();
+
+        $user = User::factory()->create();
+        $org = Organisation::create([
+            'name' => 'Range Org',
+            'slug' => 'range-org',
+            'xero_tenant_id' => (string) Str::uuid(),
+        ]);
+        $org->users()->attach($user->id, ['role' => 'admin']);
+
+        Livewire::actingAs($user)
+            ->test(ExpenseLineReview::class, ['organisation' => $org])
+            ->set('dateFrom', '2026-03-01')
+            ->set('dateTo', '2026-01-01')
+            ->call('requestSync')
+            ->assertSee(__('Choose a valid date range before syncing.'), false)
+            ->set('dateFrom', '2020-01-01')
+            ->set('dateTo', '2026-01-01')
+            ->call('requestSync')
+            ->assertSee(__('Sync up to :days days at a time.', ['days' => ExpenseLineReview::MAX_SYNC_RANGE_DAYS]), false);
+
+        Queue::assertNothingPushed();
+        $this->assertSame(0, SyncRun::withoutGlobalScopes()->where('organisation_id', $org->id)->count());
+    }
+
     public function test_update_notes_rejects_payload_longer_than_max(): void
     {
         $user = User::factory()->create();

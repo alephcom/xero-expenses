@@ -8,6 +8,7 @@ use App\Models\Organisation;
 use App\Services\Xero\XeroLineReviewWritebackService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -27,7 +28,20 @@ class PushLineReviewToXeroJob implements ShouldQueue
      */
     public function middleware(): array
     {
-        return [new EnsureMinimumDuration];
+        // One write-back per organisation at a time: concurrent pushes for the same line could create
+        // duplicate billable links, and each push rewrites the organisation's local link mirror.
+        return [
+            (new WithoutOverlapping('xero-push:'.$this->organisationId))->releaseAfter(5)->expireAfter(300),
+            new EnsureMinimumDuration,
+        ];
+    }
+
+    /**
+     * Overlap releases count as attempts, so bound retries by time rather than a fixed count.
+     */
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addMinutes(30);
     }
 
     public function handle(XeroLineReviewWritebackService $writeback): void

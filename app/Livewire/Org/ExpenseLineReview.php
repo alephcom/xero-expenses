@@ -15,6 +15,7 @@ use App\Queries\ExpenseReview\ExpenseLineReviewListQuery;
 use App\Queries\ExpenseReview\OrganisationExpenseTotalsQuery;
 use App\Services\Xero\XeroWebTransactionUrl;
 use App\Support\ExpenseReviewDatePresets;
+use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
@@ -32,6 +33,8 @@ class ExpenseLineReview extends Component
     use WithPagination;
 
     public const MAX_NOTES_LENGTH = 4096;
+
+    public const MAX_SYNC_RANGE_DAYS = 366;
 
     public Organisation $organisation;
 
@@ -123,6 +126,8 @@ class ExpenseLineReview extends Component
 
     private function hydrateActiveSyncRunFromDatabase(): void
     {
+        SyncRun::failStaleRuns($this->organisation->id);
+
         $run = SyncRun::withoutGlobalScopes()
             ->where('organisation_id', $this->organisation->id)
             ->whereIn('status', [SyncRun::STATUS_QUEUED, SyncRun::STATUS_RUNNING])
@@ -387,6 +392,22 @@ class ExpenseLineReview extends Component
     public function requestSync(): void
     {
         $this->authorize('sync', $this->organisation);
+
+        if (! $this->isValidDateString($this->dateFrom)
+            || ! $this->isValidDateString($this->dateTo)
+            || $this->dateFrom > $this->dateTo) {
+            session()->flash('sync_status_warning', __('Choose a valid date range before syncing.'));
+
+            return;
+        }
+
+        if (Carbon::parse($this->dateFrom)->diffInDays(Carbon::parse($this->dateTo)) > self::MAX_SYNC_RANGE_DAYS) {
+            session()->flash('sync_status_warning', __('Sync up to :days days at a time.', ['days' => self::MAX_SYNC_RANGE_DAYS]));
+
+            return;
+        }
+
+        SyncRun::failStaleRuns($this->organisation->id);
 
         if (SyncRun::withoutGlobalScopes()
             ->where('organisation_id', $this->organisation->id)

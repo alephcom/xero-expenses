@@ -28,6 +28,14 @@ class SyncXeroOrganisationJob implements ShouldQueue
 {
     use Queueable;
 
+    public int $tries = 1;
+
+    /**
+     * Large organisations page through many Xero requests. The queue connection's retry_after must be
+     * longer than this, or a second worker will pick the job up while it is still running.
+     */
+    public int $timeout = 900;
+
     public function __construct(
         public int $organisationId,
         public string $dateFrom,

@@ -5,6 +5,7 @@ namespace App\Services\Xero;
 use App\Models\Organisation;
 use App\Models\XeroConnection;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
 class XeroApiClient
@@ -70,8 +71,7 @@ class XeroApiClient
         $response = $this->sendWithToken($organisation, $connection, $method, $url, $query, $json);
 
         if ($response->status() === 401) {
-            $this->oauth->applyRefreshResponse($connection, $this->oauth->refreshToken($connection->refresh_token));
-            $connection->refresh();
+            $this->refreshAccessToken($connection);
 
             $response = $this->sendWithToken($organisation, $connection, $method, $url, $query, $json);
         }
@@ -121,7 +121,29 @@ class XeroApiClient
             return;
         }
 
-        $this->oauth->applyRefreshResponse($connection, $this->oauth->refreshToken($connection->refresh_token));
+        $this->refreshAccessToken($connection);
+    }
+
+    /**
+     * Xero refresh tokens are single-use, so concurrent refreshes (sync and push jobs, or orgs sharing an
+     * OAuth batch) would invalidate each other. Serialise per batch and skip the call if another process
+     * already rotated the token while we waited.
+     */
+    private function refreshAccessToken(XeroConnection $connection): void
+    {
+        $staleAccessToken = $connection->access_token;
+        $batchId = $connection->organisation->oauth_batch_id;
+        $lockKey = 'xero_token_refresh:'.($batchId ?: 'org-'.$connection->organisation_id);
+
+        Cache::lock($lockKey, 30)->block(25, function () use ($connection, $staleAccessToken): void {
+            $connection->refresh();
+            if ($connection->access_token !== $staleAccessToken) {
+                return;
+            }
+
+            $this->oauth->applyRefreshResponse($connection, $this->oauth->refreshToken($connection->refresh_token));
+        });
+
         $connection->refresh();
     }
 }

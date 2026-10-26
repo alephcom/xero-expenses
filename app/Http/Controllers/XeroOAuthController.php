@@ -9,7 +9,9 @@ use App\Services\Xero\XeroOAuthService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 class XeroOAuthController extends Controller
 {
@@ -36,8 +38,14 @@ class XeroOAuthController extends Controller
             abort(403, 'Invalid OAuth state.');
         }
 
-        $tokens = $oauth->exchangeCode($request->string('code')->toString());
-        $connections = $oauth->fetchConnections($tokens['access_token']);
+        try {
+            $tokens = $oauth->exchangeCode($request->string('code')->toString());
+            $connections = $oauth->fetchConnections($tokens['access_token']);
+        } catch (Throwable $e) {
+            Log::warning('Xero connect token exchange failed', ['message' => $e->getMessage()]);
+
+            return redirect()->route('dashboard')->with('status', __('Could not connect to Xero. Please try again.'));
+        }
         $batchId = (string) Str::uuid();
 
         $linked = false;
