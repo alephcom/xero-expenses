@@ -9,7 +9,6 @@ use App\Models\LineReview;
 use App\Models\LinkedTransactionLine;
 use App\Models\Organisation;
 use App\Models\SyncRun;
-use App\Models\XeroContact;
 use App\Queries\ExpenseReview\ExpenseLineReviewListCriteria;
 use App\Queries\ExpenseReview\ExpenseLineReviewListQuery;
 use App\Queries\ExpenseReview\OrganisationExpenseTotalsQuery;
@@ -23,6 +22,7 @@ use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Renderless;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -747,18 +747,25 @@ class ExpenseLineReview extends Component
     }
 
     /**
-     * @return array{
-     *     rows: LengthAwarePaginator,
-     *     contacts: Collection<int, XeroContact>,
-     *     contactsForPicker: list<array{id: string, name: string}>
-     * }
+     * Loaded once by the page's Alpine store rather than embedded in every render (polling re-renders
+     * every two seconds during a sync, and organisations can have thousands of contacts).
+     *
+     * @return list<array{id: string, name: string}>
+     */
+    #[Renderless]
+    public function loadContactsForPicker(): array
+    {
+        $this->authorize('view', $this->organisation);
+
+        return resolve(ExpenseLineReviewListQuery::class)->contactsForPicker($this->organisation->id);
+    }
+
+    /**
+     * @return array{rows: LengthAwarePaginator}
      */
     protected function viewData(): array
     {
-        $listQuery = resolve(ExpenseLineReviewListQuery::class);
-        $orgId = $this->organisation->id;
-
-        $rows = $listQuery->paginate($this->listCriteria());
+        $rows = resolve(ExpenseLineReviewListQuery::class)->paginate($this->listCriteria());
 
         $keysOnPage = $rows->getCollection()
             ->map(fn (object $row): string => self::lineItemKey(
@@ -771,8 +778,6 @@ class ExpenseLineReview extends Component
 
         return [
             'rows' => $rows,
-            'contacts' => $listQuery->contactsForOrganisation($orgId),
-            'contactsForPicker' => $listQuery->contactsForPicker($orgId),
         ];
     }
 

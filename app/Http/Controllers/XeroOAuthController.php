@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\OrganisationMembershipSource;
 use App\Enums\OrganisationRole;
 use App\Models\Organisation;
 use App\Models\XeroConnection;
@@ -78,7 +79,7 @@ class XeroOAuthController extends Controller
             if ($wasNew) {
                 $linked = true;
                 $org->users()->syncWithoutDetaching([
-                    $user->id => ['role' => OrganisationRole::Admin->value],
+                    $user->id => ['role' => OrganisationRole::Admin->value, 'source' => OrganisationMembershipSource::XeroConnect->value],
                 ]);
 
                 XeroConnection::withoutGlobalScopes()->updateOrCreate(
@@ -103,7 +104,10 @@ class XeroOAuthController extends Controller
 
             $linked = true;
             if (! $org->users()->where('users.id', $user->id)->exists()) {
-                $org->users()->attach($user->id, ['role' => OrganisationRole::Admin->value]);
+                $org->users()->attach($user->id, [
+                    'role' => OrganisationRole::Admin->value,
+                    'source' => OrganisationMembershipSource::XeroConnect->value,
+                ]);
             } else {
                 $org->users()->syncWithoutDetaching([$user->id]);
             }

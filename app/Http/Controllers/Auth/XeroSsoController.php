@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Auth;
 
-use App\Enums\OrganisationRole;
 use App\Http\Controllers\Controller;
 use App\Models\Invitation;
 use App\Models\User;
@@ -141,11 +140,7 @@ class XeroSsoController extends Controller
             ]);
         }
 
-        $role = OrganisationRole::tryFrom($invitation->role) ?? OrganisationRole::Reviewer;
-        $invitation->organisation->users()->syncWithoutDetaching([
-            $user->id => ['role' => $role->value],
-        ]);
-        $invitation->forceFill(['accepted_at' => now()])->save();
+        $invitation->acceptFor($user);
 
         return redirect()
             ->route('dashboard')

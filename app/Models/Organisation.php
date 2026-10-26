@@ -16,6 +16,7 @@ class Organisation extends Model
         'public_id',
         'xero_tenant_id',
         'xero_short_code',
+        'base_currency',
         'oauth_batch_id',
         'last_synced_at',
     ];
@@ -58,7 +59,7 @@ class Organisation extends Model
 
     public function users(): BelongsToMany
     {
-        return $this->belongsToMany(User::class)->withPivot('role');
+        return $this->belongsToMany(User::class)->withPivot('role', 'source');
     }
 
     public function invitations(): HasMany

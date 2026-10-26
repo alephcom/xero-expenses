@@ -368,6 +368,34 @@ class ExpenseLineReviewTest extends TestCase
         $this->assertSame(1, SyncRun::withoutGlobalScopes()->where('organisation_id', $org->id)->count());
     }
 
+    public function test_contacts_are_loaded_on_demand_instead_of_embedded_in_render(): void
+    {
+        $user = User::factory()->create();
+        $org = Organisation::create([
+            'name' => 'Picker Org',
+            'slug' => 'picker-org',
+            'xero_tenant_id' => (string) Str::uuid(),
+        ]);
+        $org->users()->attach($user->id, ['role' => 'reviewer']);
+        $contactId = (string) Str::uuid();
+        DB::table('xero_contacts')->insert([
+            'organisation_id' => $org->id,
+            'xero_contact_id' => $contactId,
+            'name' => 'Zebra Contact Ltd',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $component = Livewire::actingAs($user)
+            ->test(ExpenseLineReview::class, ['organisation' => $org])
+            ->assertDontSee('Zebra Contact Ltd');
+
+        $this->assertSame(
+            [['id' => $contactId, 'name' => 'Zebra Contact Ltd']],
+            $component->instance()->loadContactsForPicker(),
+        );
+    }
+
     public function test_request_sync_replaces_stale_in_progress_run(): void
     {
         Queue::fake();

@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Xero SSO reviewer access is now kept in step with Xero:** Memberships record how they were created. Reviewer access granted automatically at sign-in is removed on a later sign-in once Xero no longer lists the user with an allowed role (never on a failed Xero request). Members added by invitation, Connect Xero, or an admin role change are not touched. When an admin removes a member, sign-in no longer re-adds them; accepting a new invitation lifts that. Existing memberships are treated as manual.
+- **Currency fallback:** Sync stores each organisation's Xero base currency and uses it for transactions without a currency code, instead of USD.
+- **Contact picker payload:** Archived Xero contacts are kept for display but hidden from the Invoice to picker, and the contact list is fetched once when the page loads instead of being embedded in every render (including the two-second sync polling).
+- **`reviewed_at` preserved:** Reconciling billable links from Xero no longer overwrites when a person last edited a line, and rows created by sync leave it empty.
+- **`composer.lock`** content hash refreshed to match `composer.json`.
 - **Xero token refresh race:** Token refreshes are serialised per OAuth batch with a cache lock, and skipped when another worker already rotated the token. Xero refresh tokens are single-use, so concurrent sync and write-back jobs could previously invalidate the connection.
 - **Sync no longer empties data on failure:** Accounts, contacts, expense lines, and linked transactions are fetched from Xero first and then swapped in a database transaction, so a failed request mid-sync leaves the previous data in place.
 - **Write-back API usage:** After a push, only the affected transaction's billable links are re-fetched instead of every link in the organisation. Pushes for the same organisation no longer run concurrently (prevents duplicate links).

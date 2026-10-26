@@ -5,7 +5,6 @@ namespace App\Queries\ExpenseReview;
 use App\Models\XeroContact;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Query\Builder;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class ExpenseLineReviewListQuery
@@ -27,22 +26,17 @@ class ExpenseLineReviewListQuery
     ];
 
     /**
-     * @return Collection<int, XeroContact>
-     */
-    public function contactsForOrganisation(int $organisationId): Collection
-    {
-        return XeroContact::withoutGlobalScopes()
-            ->where('organisation_id', $organisationId)
-            ->orderBy('name')
-            ->get();
-    }
-
-    /**
+     * Active contacts only; archived contacts stay in the table so existing links keep their names.
+     *
      * @return list<array{id: string, name: string}>
      */
     public function contactsForPicker(int $organisationId): array
     {
-        return $this->contactsForOrganisation($organisationId)
+        return XeroContact::withoutGlobalScopes()
+            ->where('organisation_id', $organisationId)
+            ->where('is_archived', false)
+            ->orderBy('name')
+            ->get(['xero_contact_id', 'name'])
             ->map(fn (XeroContact $c) => [
                 'id' => (string) $c->xero_contact_id,
                 'name' => $c->name,

@@ -1,6 +1,5 @@
 <?php
 
-use App\Enums\OrganisationRole;
 use App\Models\Invitation;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
@@ -64,11 +63,7 @@ new #[Layout('layouts.guest')] class extends Component
             return;
         }
 
-        $role = OrganisationRole::tryFrom($invitation->role) ?? OrganisationRole::Reviewer;
-        $invitation->organisation->users()->syncWithoutDetaching([
-            $user->id => ['role' => $role->value],
-        ]);
-        $invitation->forceFill(['accepted_at' => now()])->save();
+        $invitation->acceptFor($user);
 
         $this->redirect(route('dashboard', absolute: false), navigate: true);
     }

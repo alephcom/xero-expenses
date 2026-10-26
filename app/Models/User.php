@@ -33,7 +33,7 @@ class User extends Authenticatable
 
     public function organisations(): BelongsToMany
     {
-        return $this->belongsToMany(Organisation::class)->withPivot('role');
+        return $this->belongsToMany(Organisation::class)->withPivot('role', 'source');
     }
 
     public function organisationRole(Organisation $organisation): ?OrganisationRole

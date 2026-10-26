@@ -1,4 +1,4 @@
-<div x-data x-init="Alpine.store('xeroExpReviewContacts', { list: @js($contactsForPicker ?? []) })">
+<div x-data x-init="Alpine.store('xeroExpReviewContacts', { list: [] }); $wire.loadContactsForPicker().then(list => { Alpine.store('xeroExpReviewContacts').list = list; })">
     <header class="bg-white shadow">
         <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
             <div>
