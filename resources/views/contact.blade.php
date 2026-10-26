@@ -4,6 +4,12 @@
 
 @section('meta_description', __('Send a message to the team running Expense Review for Xero.'))
 
+@if (\App\Rules\Turnstile::enabled())
+    @push('head')
+        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    @endpush
+@endif
+
 @section('content')
     <div
         class="animate-luxury-reveal w-full max-w-xl rounded-2xl border border-white/[0.08] bg-white/[0.04] p-8 shadow-[0_0_0_1px_rgba(196,165,116,0.12),0_25px_80px_-20px_rgba(0,0,0,0.65)] backdrop-blur-xl sm:p-10 lg:rounded-3xl [animation-delay:80ms] [animation-fill-mode:both]"
@@ -91,6 +97,19 @@
                     <p class="mt-1.5 text-sm text-red-300/90">{{ $message }}</p>
                 @enderror
             </div>
+
+            @if (\App\Rules\Turnstile::enabled())
+                <div>
+                    <div
+                        class="cf-turnstile"
+                        data-sitekey="{{ config('services.turnstile.site_key') }}"
+                        data-theme="dark"
+                    ></div>
+                    @error('cf-turnstile-response')
+                        <p class="mt-1.5 text-sm text-red-300/90">{{ $message }}</p>
+                    @enderror
+                </div>
+            @endif
 
             <div class="pt-1">
                 <button

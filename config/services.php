@@ -35,6 +35,12 @@ return [
         ],
     ],
 
+    'turnstile' => [
+        'site_key' => env('TURNSTILE_SITE_KEY'),
+        'secret_key' => env('TURNSTILE_SECRET_KEY'),
+        'verify_url' => 'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+    ],
+
     'xero' => [
         'client_id' => env('XERO_CLIENT_ID'),
         'client_secret' => env('XERO_CLIENT_SECRET'),
