@@ -194,7 +194,8 @@ class XeroSyncService
     {
         $rows = [];
         for ($page = 1; ; $page++) {
-            $json = $this->client->get($organisation, 'Contacts', ['page' => $page]);
+            // Xero omits ARCHIVED contacts unless asked; we keep them so existing links still show a name.
+            $json = $this->client->get($organisation, 'Contacts', ['page' => $page, 'includeArchived' => 'true']);
             $contacts = $json['Contacts'] ?? [];
             if (count($contacts) === 0) {
                 break;

@@ -46,10 +46,13 @@ class XeroSyncServiceCurrencyAndContactsTest extends TestCase
             return Http::response(match (true) {
                 str_ends_with($path, '/Organisation') => ['Organisations' => [['ShortCode' => '!abc', 'BaseCurrency' => 'NZD']]],
                 str_ends_with($path, '/Accounts') => ['Accounts' => [['AccountID' => $accountId, 'Code' => '400', 'Type' => 'EXPENSE']]],
-                str_ends_with($path, '/Contacts') => ['Contacts' => $firstPage ? [
+                // Mirror Xero: archived contacts are only returned with includeArchived=true.
+                str_ends_with($path, '/Contacts') => ['Contacts' => $firstPage ? array_values(array_filter([
                     ['ContactID' => $activeId, 'Name' => 'Active Co', 'ContactStatus' => 'ACTIVE'],
-                    ['ContactID' => $archivedId, 'Name' => 'Old Co', 'ContactStatus' => 'ARCHIVED'],
-                ] : []],
+                    ($query['includeArchived'] ?? '') === 'true'
+                        ? ['ContactID' => $archivedId, 'Name' => 'Old Co', 'ContactStatus' => 'ARCHIVED']
+                        : null,
+                ])) : []],
                 str_ends_with($path, '/BankTransactions') => ['BankTransactions' => $firstPage ? [[
                     'BankTransactionID' => (string) Str::uuid(),
                     'Date' => '2026-01-15',
