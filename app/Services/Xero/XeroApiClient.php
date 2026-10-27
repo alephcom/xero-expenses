@@ -67,10 +67,11 @@ class XeroApiClient
 
         $url = rtrim(config('services.xero.api_base'), '/').'/'.ltrim($path, '/');
 
+        $usedAccessToken = $connection->access_token;
         $response = $this->sendWithToken($organisation, $connection, $method, $url, $query, $json);
 
         if ($response->status() === 401) {
-            $this->oauth->applyRefreshResponse($connection, $this->oauth->refreshToken($connection->refresh_token));
+            $this->oauth->refreshConnectionTokens($connection, $usedAccessToken);
             $connection->refresh();
 
             $response = $this->sendWithToken($organisation, $connection, $method, $url, $query, $json);
@@ -121,7 +122,7 @@ class XeroApiClient
             return;
         }
 
-        $this->oauth->applyRefreshResponse($connection, $this->oauth->refreshToken($connection->refresh_token));
+        $this->oauth->refreshConnectionTokens($connection, $connection->access_token);
         $connection->refresh();
     }
 }

@@ -64,12 +64,16 @@ class SyncXeroOrganisationJob implements ShouldQueue
 
         OrganisationContext::set($organisation->id);
 
-        $sync->sync(
-            $organisation,
-            Carbon::parse($this->dateFrom),
-            Carbon::parse($this->dateTo),
-            $this->syncRunId,
-        );
+        try {
+            $sync->sync(
+                $organisation,
+                Carbon::parse($this->dateFrom),
+                Carbon::parse($this->dateTo),
+                $this->syncRunId,
+            );
+        } finally {
+            OrganisationContext::set(null);
+        }
     }
 
     public function failed(?Throwable $e): void
