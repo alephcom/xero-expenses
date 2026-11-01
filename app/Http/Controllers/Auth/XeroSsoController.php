@@ -78,23 +78,27 @@ class XeroSsoController extends Controller
                 'email_verified_at' => now(),
             ]);
         } else {
-            $attributes = [
-                'name' => $claims['name'],
-                'xero_sub' => $claims['sub'],
-                'email_verified_at' => now(),
-            ];
-
-            // Follow an email change in Xero unless another account already uses that address,
-            // which would otherwise fail the unique index and break sign-in.
+            // The stored email must always be the one Xero just verified: invitations and reviewer
+            // auto-access are granted by email. If another account already holds it, refuse sign-in
+            // rather than keep an address the id_token no longer asserts (or hit the unique index).
             $emailTaken = User::query()
                 ->whereRaw('LOWER(email) = ?', [Str::lower($claims['email'])])
                 ->whereKeyNot($user->id)
                 ->exists();
-            if (! $emailTaken) {
-                $attributes['email'] = $claims['email'];
+            if ($emailTaken) {
+                $request->session()->forget('post_sso_invitation_plain');
+
+                return redirect()->route('login')->withErrors([
+                    'xero' => __('Your Xero email address is already used by another account here. Contact an administrator to merge or update the accounts.'),
+                ]);
             }
 
-            $user->forceFill($attributes)->save();
+            $user->forceFill([
+                'name' => $claims['name'],
+                'email' => $claims['email'],
+                'xero_sub' => $claims['sub'],
+                'email_verified_at' => now(),
+            ])->save();
         }
 
         Auth::login($user, remember: true);

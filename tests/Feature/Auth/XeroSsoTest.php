@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Auth;
 
+use App\Jobs\SyncXeroReviewerAccessJob;
 use App\Models\Invitation;
 use App\Models\Organisation;
 use App\Models\User;
@@ -9,6 +10,7 @@ use App\Models\XeroConnection;
 use App\Services\Xero\XeroApiClient;
 use App\Services\Xero\XeroSsoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Mockery;
 use Tests\TestCase;
@@ -273,8 +275,10 @@ class XeroSsoTest extends TestCase
         $this->assertNull($created['invitation']->fresh()->accepted_at);
     }
 
-    public function test_sso_callback_keeps_existing_email_when_xero_email_belongs_to_another_account(): void
+    public function test_sso_callback_refuses_sign_in_when_xero_email_belongs_to_another_account(): void
     {
+        Queue::fake();
+
         $existing = User::factory()->create([
             'email' => 'old@example.com',
             'xero_sub' => 'xero-sub-changed',
@@ -290,13 +294,15 @@ class XeroSsoTest extends TestCase
         ]);
         $this->app->instance(XeroSsoService::class, $mock);
 
-        $this->withSession(['xero_sso_state' => 'ok'])
+        $this->withSession(['xero_sso_state' => 'ok', 'post_sso_invitation_plain' => 'some-token'])
             ->get(route('xero.callback', ['code' => 'c', 'state' => 'ok']))
-            ->assertRedirect(route('dashboard', absolute: false));
+            ->assertRedirect(route('login'))
+            ->assertSessionHasErrors('xero')
+            ->assertSessionMissing('post_sso_invitation_plain');
 
-        $this->assertAuthenticatedAs($existing);
+        $this->assertGuest();
         $this->assertSame('old@example.com', $existing->fresh()->email);
-        $this->assertSame('Renamed', $existing->fresh()->name);
+        Queue::assertNotPushed(SyncXeroReviewerAccessJob::class);
     }
 
     protected function tearDown(): void
