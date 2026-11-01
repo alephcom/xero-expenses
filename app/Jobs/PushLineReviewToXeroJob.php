@@ -3,9 +3,11 @@
 namespace App\Jobs;
 
 use App\Jobs\Middleware\EnsureMinimumDuration;
+use App\Jobs\Middleware\XeroOrganisationLock;
 use App\Models\LineReview;
 use App\Models\Organisation;
 use App\Services\Xero\XeroLineReviewWritebackService;
+use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
@@ -14,6 +16,12 @@ use Illuminate\Support\Str;
 class PushLineReviewToXeroJob implements ShouldQueue
 {
     use Queueable;
+
+    /** Keep below the queue connection's retry_after so a running push is never picked up twice. */
+    public int $timeout = 120;
+
+    /** Releases while another Xero job holds the organisation lock are fine; a real error is not retried. */
+    public int $maxExceptions = 1;
 
     public function __construct(
         public int $organisationId,
@@ -27,7 +35,15 @@ class PushLineReviewToXeroJob implements ShouldQueue
      */
     public function middleware(): array
     {
-        return [new EnsureMinimumDuration];
+        return [
+            XeroOrganisationLock::for($this->organisationId, $this->timeout),
+            new EnsureMinimumDuration,
+        ];
+    }
+
+    public function retryUntil(): DateTimeInterface
+    {
+        return now()->addMinutes(30);
     }
 
     public function handle(XeroLineReviewWritebackService $writeback): void

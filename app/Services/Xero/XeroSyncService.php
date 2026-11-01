@@ -464,11 +464,66 @@ class XeroSyncService
     }
 
     /**
-     * Re-fetch billable expense links from Xero and replace local rows for this organisation.
+     * Replace local billable expense links for one source transaction with rows already fetched
+     * from Xero (LinkedTransactions?SourceTransactionID=...), then reconcile invoice flags.
+     *
+     * Used after a write-back so a single edit does not re-download every link for the organisation.
+     *
+     * @param  list<array<string, mixed>>  $linkedTransactions
      */
-    public function refreshLinkedTransactionsForOrganisation(Organisation $organisation): void
+    public function replaceLinkedTransactionLinesForSource(
+        Organisation $organisation,
+        string $sourceTransactionId,
+        array $linkedTransactions,
+    ): void {
+        $rows = [];
+        foreach ($linkedTransactions as $lt) {
+            $row = $this->linkedTransactionRow($organisation, $lt);
+            if ($row !== null && strcasecmp($row['source_transaction_id'], $sourceTransactionId) === 0) {
+                $rows[] = $row;
+            }
+        }
+
+        DB::transaction(function () use ($organisation, $sourceTransactionId, $rows): void {
+            LinkedTransactionLine::withoutGlobalScopes()
+                ->where('organisation_id', $organisation->id)
+                ->where('source_transaction_id', $sourceTransactionId)
+                ->delete();
+            foreach (array_chunk($rows, 250) as $chunk) {
+                LinkedTransactionLine::withoutGlobalScopes()->insert($chunk);
+            }
+        });
+
+        $this->reconcileLineReviewInvoiceFlagsFromLinkedTransactions($organisation);
+    }
+
+    /**
+     * @param  array<string, mixed>  $lt
+     * @return array<string, mixed>|null
+     */
+    private function linkedTransactionRow(Organisation $organisation, array $lt): ?array
     {
-        $this->replaceLinkedTransactionLines($organisation);
+        $linkId = $lt['LinkedTransactionID'] ?? null;
+        $st = $lt['SourceTransactionID'] ?? null;
+        $sl = $lt['SourceLineItemID'] ?? null;
+        if (! $linkId || ! $st || ! $sl) {
+            return null;
+        }
+        $contact = $lt['ContactID'] ?? null;
+        $targetTx = $lt['TargetTransactionID'] ?? null;
+        $targetLine = $lt['TargetLineItemID'] ?? null;
+
+        return [
+            'organisation_id' => $organisation->id,
+            'xero_linked_transaction_id' => (string) $linkId,
+            'source_transaction_id' => (string) $st,
+            'source_line_item_id' => (string) $sl,
+            'contact_id' => $contact !== null && $contact !== '' ? (string) $contact : null,
+            'target_transaction_id' => $targetTx !== null && $targetTx !== '' ? (string) $targetTx : null,
+            'target_line_item_id' => $targetLine !== null && $targetLine !== '' ? (string) $targetLine : null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
     }
 
     private function replaceLinkedTransactionLines(Organisation $organisation): void
@@ -483,26 +538,10 @@ class XeroSyncService
                 break;
             }
             foreach ($list as $lt) {
-                $linkId = $lt['LinkedTransactionID'] ?? null;
-                $st = $lt['SourceTransactionID'] ?? null;
-                $sl = $lt['SourceLineItemID'] ?? null;
-                if (! $linkId || ! $st || ! $sl) {
-                    continue;
+                $row = $this->linkedTransactionRow($organisation, $lt);
+                if ($row !== null) {
+                    $rows[] = $row;
                 }
-                $contact = $lt['ContactID'] ?? null;
-                $targetTx = $lt['TargetTransactionID'] ?? null;
-                $targetLine = $lt['TargetLineItemID'] ?? null;
-                $rows[] = [
-                    'organisation_id' => $organisation->id,
-                    'xero_linked_transaction_id' => (string) $linkId,
-                    'source_transaction_id' => (string) $st,
-                    'source_line_item_id' => (string) $sl,
-                    'contact_id' => $contact !== null && $contact !== '' ? (string) $contact : null,
-                    'target_transaction_id' => $targetTx !== null && $targetTx !== '' ? (string) $targetTx : null,
-                    'target_line_item_id' => $targetLine !== null && $targetLine !== '' ? (string) $targetLine : null,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ];
             }
         }
 

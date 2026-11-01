@@ -3,12 +3,14 @@
 namespace App\Jobs;
 
 use App\Jobs\Middleware\EnsureMinimumDuration;
+use App\Jobs\Middleware\XeroOrganisationLock;
 use App\Models\Organisation;
 use App\Models\SyncRun;
 use App\Models\User;
 use App\Services\Xero\XeroSyncService;
 use App\Support\OrganisationContext;
 use Carbon\Carbon;
+use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Gate;
@@ -28,6 +30,12 @@ class SyncXeroOrganisationJob implements ShouldQueue
 {
     use Queueable;
 
+    /** Keep below the queue connection's retry_after so a running sync is never picked up twice. */
+    public int $timeout = 900;
+
+    /** Releases while another Xero job holds the organisation lock are fine; a real error is not retried. */
+    public int $maxExceptions = 1;
+
     public function __construct(
         public int $organisationId,
         public string $dateFrom,
@@ -41,7 +49,15 @@ class SyncXeroOrganisationJob implements ShouldQueue
      */
     public function middleware(): array
     {
-        return [new EnsureMinimumDuration];
+        return [
+            XeroOrganisationLock::for($this->organisationId, $this->timeout),
+            new EnsureMinimumDuration,
+        ];
+    }
+
+    public function retryUntil(): DateTimeInterface
+    {
+        return now()->addMinutes(30);
     }
 
     /**

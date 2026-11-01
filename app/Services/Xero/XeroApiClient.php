@@ -6,9 +6,18 @@ use App\Models\Organisation;
 use App\Models\XeroConnection;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Sleep;
 
 class XeroApiClient
 {
+    /** Retries after a 429 before giving up and letting the caller see the error. */
+    private const RATE_LIMIT_MAX_RETRIES = 3;
+
+    /** Xero's minute limit resets within 60s; longer Retry-After values (daily limit) are not waited out. */
+    private const RATE_LIMIT_MAX_WAIT_SECONDS = 60;
+
+    private const RATE_LIMIT_DEFAULT_WAIT_SECONDS = 5;
+
     public function __construct(
         private readonly XeroOAuthService $oauth,
     ) {}
@@ -74,6 +83,17 @@ class XeroApiClient
             $this->oauth->refreshConnectionTokens($connection, $usedAccessToken);
             $connection->refresh();
 
+            $response = $this->sendWithToken($organisation, $connection, $method, $url, $query, $json);
+        }
+
+        for ($retry = 0; $response->status() === 429 && $retry < self::RATE_LIMIT_MAX_RETRIES; $retry++) {
+            $retryAfter = $response->header('Retry-After');
+            $wait = is_numeric($retryAfter) ? (int) $retryAfter : self::RATE_LIMIT_DEFAULT_WAIT_SECONDS;
+            if ($wait > self::RATE_LIMIT_MAX_WAIT_SECONDS) {
+                break;
+            }
+
+            Sleep::for(max(1, $wait))->seconds();
             $response = $this->sendWithToken($organisation, $connection, $method, $url, $query, $json);
         }
 
