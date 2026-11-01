@@ -179,10 +179,12 @@ class XeroSyncService
             ];
         }
 
-        XeroAccount::withoutGlobalScopes()->where('organisation_id', $organisation->id)->delete();
-        foreach (array_chunk($rows, 250) as $chunk) {
-            XeroAccount::withoutGlobalScopes()->insert($chunk);
-        }
+        DB::transaction(function () use ($organisation, $rows): void {
+            XeroAccount::withoutGlobalScopes()->where('organisation_id', $organisation->id)->delete();
+            foreach (array_chunk($rows, 250) as $chunk) {
+                XeroAccount::withoutGlobalScopes()->insert($chunk);
+            }
+        });
     }
 
     private function syncContactsPaged(Organisation $organisation): void
@@ -209,10 +211,12 @@ class XeroSyncService
             }
         }
 
-        XeroContact::withoutGlobalScopes()->where('organisation_id', $organisation->id)->delete();
-        foreach (array_chunk($rows, 250) as $chunk) {
-            XeroContact::withoutGlobalScopes()->insert($chunk);
-        }
+        DB::transaction(function () use ($organisation, $rows): void {
+            XeroContact::withoutGlobalScopes()->where('organisation_id', $organisation->id)->delete();
+            foreach (array_chunk($rows, 250) as $chunk) {
+                XeroContact::withoutGlobalScopes()->insert($chunk);
+            }
+        });
     }
 
     /**
@@ -224,18 +228,21 @@ class XeroSyncService
         Carbon $dateTo,
         array $expenseAccountIds,
     ): void {
-        ExpenseLine::withoutGlobalScopes()
-            ->where('organisation_id', $organisation->id)
-            ->whereBetween('occurred_on', [$dateFrom->toDateString(), $dateTo->toDateString()])
-            ->delete();
-
+        // Fetch everything before deleting so a failed Xero call leaves existing lines intact.
         $rows = [];
         $this->collectSpendLines($organisation, $dateFrom, $dateTo, $expenseAccountIds, $rows);
         $this->collectBillLines($organisation, $dateFrom, $dateTo, $expenseAccountIds, $rows);
 
-        foreach (array_chunk($rows, 250) as $chunk) {
-            ExpenseLine::withoutGlobalScopes()->insert($chunk);
-        }
+        DB::transaction(function () use ($organisation, $dateFrom, $dateTo, $rows): void {
+            ExpenseLine::withoutGlobalScopes()
+                ->where('organisation_id', $organisation->id)
+                ->whereBetween('occurred_on', [$dateFrom->toDateString(), $dateTo->toDateString()])
+                ->delete();
+
+            foreach (array_chunk($rows, 250) as $chunk) {
+                ExpenseLine::withoutGlobalScopes()->insert($chunk);
+            }
+        });
     }
 
     /**
@@ -466,8 +473,8 @@ class XeroSyncService
 
     private function replaceLinkedTransactionLines(Organisation $organisation): void
     {
-        LinkedTransactionLine::withoutGlobalScopes()->where('organisation_id', $organisation->id)->delete();
-
+        // Fetch everything before deleting so a failed Xero call keeps existing links (and the
+        // invoiced-line locks that depend on them) in place.
         $rows = [];
         for ($page = 1; ; $page++) {
             $json = $this->client->get($organisation, 'LinkedTransactions', ['page' => $page]);
@@ -499,9 +506,12 @@ class XeroSyncService
             }
         }
 
-        foreach (array_chunk($rows, 250) as $chunk) {
-            LinkedTransactionLine::withoutGlobalScopes()->insert($chunk);
-        }
+        DB::transaction(function () use ($organisation, $rows): void {
+            LinkedTransactionLine::withoutGlobalScopes()->where('organisation_id', $organisation->id)->delete();
+            foreach (array_chunk($rows, 250) as $chunk) {
+                LinkedTransactionLine::withoutGlobalScopes()->insert($chunk);
+            }
+        });
 
         $this->reconcileLineReviewInvoiceFlagsFromLinkedTransactions($organisation);
     }

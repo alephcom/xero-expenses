@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Xero billable expense write-back:** When you mark a line for invoicing, choose an invoice-to contact, or save notes, the app queues a job that updates Xero. Billable expenses use the Linked Transactions API (SPEND and ACCPAY lines). Notes are appended via History on the parent bank transaction or bill, prefixed so multi-line parents stay distinguishable. Linked transaction sync now stores every link from Xero (including drafts without a contact) plus each link’s Xero id. Line reviews record the last pushed note text for deduplication and any push error for display in the expanded row.
 - **Invoice flag from Xero:** After linked transactions are synced, any expense line with a billable link that includes a customer in Xero gets `needs_invoicing` and `selected_contact_id` updated to match. Existing notes and reviewed state on a line review are left unchanged when reconciling.
 
+### Fixed
+
+- **Organisation scope leaking between queued jobs:** The queue resets `OrganisationContext` before and after every job, and `SyncXeroOrganisationJob` clears it when done. `Organisation::xeroConnection()` is unscoped, so a write-back for one organisation no longer fails with "No Xero connection" after a sync of another on the same worker, and token refreshes during a sync now reach batch peer connections.
+- **Non-admins could re-batch an existing organisation:** Connecting Xero as a non-admin no longer updates an already-linked organisation's `oauth_batch_id` or name (previously done before the admin check, which let the non-admin's refreshed tokens overwrite the admin's connection).
+- **Concurrent Xero token refreshes:** Refreshes take a cache lock per OAuth batch and re-read the stored token, so two workers no longer spend the same single-use refresh token and break the connection.
+- **Failed syncs deleting local data:** Expense lines and linked transactions are fetched from Xero before local rows are replaced, and accounts, contacts, expense lines, and linked transactions are swapped inside a database transaction. A Xero error mid-sync now leaves the previous data (and invoiced-line locks) intact.
+
 ### Changed
 
 - **Dashboard invitations UI:** The separate invite-only Livewire block is replaced by **Team and invitations** (`ManageOrganisationTeam`), which keeps sending invites and adds invitation and member management for admins.

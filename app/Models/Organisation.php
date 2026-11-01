@@ -66,9 +66,13 @@ class Organisation extends Model
         return $this->hasMany(Invitation::class);
     }
 
+    /**
+     * Unscoped: the relation is already constrained to this organisation, and token refresh
+     * must reach peer organisations' connections even while OrganisationContext is set.
+     */
     public function xeroConnection(): HasOne
     {
-        return $this->hasOne(XeroConnection::class);
+        return $this->hasOne(XeroConnection::class)->withoutGlobalScopes();
     }
 
     public function syncRuns(): HasMany

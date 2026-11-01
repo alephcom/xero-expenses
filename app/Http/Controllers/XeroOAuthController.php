@@ -58,16 +58,7 @@ class XeroOAuthController extends Controller
                 ]
             );
 
-            $wasNew = $org->wasRecentlyCreated;
-
-            if (! $wasNew) {
-                $org->update([
-                    'name' => $tenant['tenantName'] ?? $org->name,
-                    'oauth_batch_id' => $batchId,
-                ]);
-            }
-
-            if ($wasNew) {
+            if ($org->wasRecentlyCreated) {
                 $linked = true;
                 $org->users()->syncWithoutDetaching([
                     $user->id => ['role' => OrganisationRole::Admin->value],
@@ -87,11 +78,18 @@ class XeroOAuthController extends Controller
                 continue;
             }
 
+            // Check before touching the org: oauth_batch_id decides which connections share
+            // refreshed tokens, so a non-admin must not be able to move the org into their batch.
             if (Gate::forUser($user)->denies('manageXeroConnection', $org)) {
                 $skippedExisting = true;
 
                 continue;
             }
+
+            $org->update([
+                'name' => $tenant['tenantName'] ?? $org->name,
+                'oauth_batch_id' => $batchId,
+            ]);
 
             $linked = true;
             if (! $org->users()->where('users.id', $user->id)->exists()) {
