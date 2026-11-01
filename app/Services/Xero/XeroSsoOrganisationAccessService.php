@@ -4,6 +4,7 @@ namespace App\Services\Xero;
 
 use App\Enums\OrganisationRole;
 use App\Models\Organisation;
+use App\Models\OrganisationMemberRemoval;
 use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -34,8 +35,13 @@ class XeroSsoOrganisationAccessService
         /** @var Collection<int, int> $memberOrgIds */
         $memberOrgIds = $user->organisations()->pluck('id');
 
+        // An admin removed the user from these; only a new invitation brings them back.
+        $removedFromOrgIds = OrganisationMemberRemoval::query()
+            ->where('user_id', $user->id)
+            ->pluck('organisation_id');
+
         foreach (Organisation::query()->whereHas('xeroConnection')->orderBy('id')->cursor() as $organisation) {
-            if ($memberOrgIds->contains($organisation->id)) {
+            if ($memberOrgIds->contains($organisation->id) || $removedFromOrgIds->contains($organisation->id)) {
                 continue;
             }
 

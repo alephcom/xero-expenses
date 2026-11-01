@@ -5,6 +5,7 @@ namespace App\Livewire\Dashboard;
 use App\Enums\OrganisationRole;
 use App\Models\Invitation;
 use App\Models\Organisation;
+use App\Models\OrganisationMemberRemoval;
 use App\Models\User;
 use App\Notifications\InvitationNotification;
 use Illuminate\Database\Eloquent\Collection;
@@ -299,6 +300,7 @@ class ManageOrganisationTeam extends Component
         }
 
         $organisation->users()->detach($userId);
+        OrganisationMemberRemoval::record($organisation, $userId, (int) auth()->id());
 
         $this->successMessage = __('Member removed from organisation.');
     }

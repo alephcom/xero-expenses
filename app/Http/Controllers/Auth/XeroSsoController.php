@@ -4,9 +4,10 @@ namespace App\Http\Controllers\Auth;
 
 use App\Enums\OrganisationRole;
 use App\Http\Controllers\Controller;
+use App\Jobs\SyncXeroReviewerAccessJob;
 use App\Models\Invitation;
+use App\Models\OrganisationMemberRemoval;
 use App\Models\User;
-use App\Services\Xero\XeroSsoOrganisationAccessService;
 use App\Services\Xero\XeroSsoService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -91,7 +92,7 @@ class XeroSsoController extends Controller
         $invitationRedirect = $this->tryCompleteInvitationAfterSso($request, $user);
 
         if (Auth::check()) {
-            app(XeroSsoOrganisationAccessService::class)->syncReviewerAccessFromXero($user->fresh());
+            SyncXeroReviewerAccessJob::dispatch($user->id);
         }
 
         if ($invitationRedirect !== null) {
@@ -145,6 +146,7 @@ class XeroSsoController extends Controller
         $invitation->organisation->users()->syncWithoutDetaching([
             $user->id => ['role' => $role->value],
         ]);
+        OrganisationMemberRemoval::clear($invitation->organisation, $user->id);
         $invitation->forceFill(['accepted_at' => now()])->save();
 
         return redirect()

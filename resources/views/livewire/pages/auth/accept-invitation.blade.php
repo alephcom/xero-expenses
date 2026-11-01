@@ -2,6 +2,7 @@
 
 use App\Enums\OrganisationRole;
 use App\Models\Invitation;
+use App\Models\OrganisationMemberRemoval;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
@@ -68,6 +69,7 @@ new #[Layout('layouts.guest')] class extends Component
         $invitation->organisation->users()->syncWithoutDetaching([
             $user->id => ['role' => $role->value],
         ]);
+        OrganisationMemberRemoval::clear($invitation->organisation, $user->id);
         $invitation->forceFill(['accepted_at' => now()])->save();
 
         $this->redirect(route('dashboard', absolute: false), navigate: true);
