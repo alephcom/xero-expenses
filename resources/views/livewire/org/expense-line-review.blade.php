@@ -89,10 +89,12 @@
                     <div>
                         <x-input-label for="dateFrom" :value="__('From')" />
                         <x-text-input id="dateFrom" type="date" class="mt-1 block w-full" wire:model.live="dateFrom" />
+                        <x-input-error :messages="$errors->get('dateFrom')" class="mt-2" />
                     </div>
                     <div>
                         <x-input-label for="dateTo" :value="__('To')" />
                         <x-text-input id="dateTo" type="date" class="mt-1 block w-full" wire:model.live="dateTo" />
+                        <x-input-error :messages="$errors->get('dateTo')" class="mt-2" />
                     </div>
                     <div>
                         <x-input-label for="hasLink" :value="__('Xero customer link')" />

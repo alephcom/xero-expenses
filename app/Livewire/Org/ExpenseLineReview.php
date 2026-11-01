@@ -18,6 +18,7 @@ use App\Support\ExpenseReviewDatePresets;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -388,23 +389,41 @@ class ExpenseLineReview extends Component
     {
         $this->authorize('sync', $this->organisation);
 
-        if (SyncRun::withoutGlobalScopes()
-            ->where('organisation_id', $this->organisation->id)
-            ->whereIn('status', [SyncRun::STATUS_QUEUED, SyncRun::STATUS_RUNNING])
-            ->exists()) {
+        // dateFrom/dateTo are client-writable, so check them before they reach the job.
+        $this->validate([
+            'dateFrom' => ['required', 'date_format:Y-m-d'],
+            'dateTo' => ['required', 'date_format:Y-m-d', 'after_or_equal:dateFrom'],
+        ]);
+
+        // Hold a short lock so a double-click can't pass the in-progress check twice.
+        $lock = Cache::lock('sync-request:'.$this->organisation->id, 10);
+        if (! $lock->get()) {
             session()->flash('sync_status_warning', __('A sync is already in progress for this organisation.'));
 
             return;
         }
 
-        $run = SyncRun::create([
-            'organisation_id' => $this->organisation->id,
-            'status' => SyncRun::STATUS_QUEUED,
-            'started_at' => now(),
-            'date_from' => $this->dateFrom,
-            'date_to' => $this->dateTo,
-            'meta' => ['step' => 'queued'],
-        ]);
+        try {
+            if (SyncRun::withoutGlobalScopes()
+                ->where('organisation_id', $this->organisation->id)
+                ->whereIn('status', [SyncRun::STATUS_QUEUED, SyncRun::STATUS_RUNNING])
+                ->exists()) {
+                session()->flash('sync_status_warning', __('A sync is already in progress for this organisation.'));
+
+                return;
+            }
+
+            $run = SyncRun::create([
+                'organisation_id' => $this->organisation->id,
+                'status' => SyncRun::STATUS_QUEUED,
+                'started_at' => now(),
+                'date_from' => $this->dateFrom,
+                'date_to' => $this->dateTo,
+                'meta' => ['step' => 'queued'],
+            ]);
+        } finally {
+            $lock->release();
+        }
 
         SyncXeroOrganisationJob::dispatch(
             $this->organisation->id,

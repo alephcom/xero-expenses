@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Support\ExpenseReviewDatePresets;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -1293,5 +1294,75 @@ class ExpenseLineReviewTest extends TestCase
         Livewire::actingAs($user)
             ->test(ExpenseLineReview::class, ['organisation' => $org])
             ->assertSet('activeSyncRunId', $run->id);
+    }
+
+    /**
+     * @return array{0: User, 1: Organisation}
+     */
+    private function syncAdminAndOrganisation(): array
+    {
+        $user = User::factory()->create();
+        $org = Organisation::create([
+            'name' => 'Validate Org',
+            'slug' => 'validate-org',
+            'xero_tenant_id' => (string) Str::uuid(),
+        ]);
+        $org->users()->attach($user->id, ['role' => 'admin']);
+
+        return [$user, $org];
+    }
+
+    public function test_request_sync_rejects_malformed_dates(): void
+    {
+        Queue::fake();
+        [$user, $org] = $this->syncAdminAndOrganisation();
+
+        Livewire::actingAs($user)
+            ->test(ExpenseLineReview::class, ['organisation' => $org])
+            ->set('dateFrom', 'not-a-date')
+            ->set('dateTo', '2026-01-31')
+            ->call('requestSync')
+            ->assertHasErrors(['dateFrom']);
+
+        Queue::assertNothingPushed();
+        $this->assertSame(0, SyncRun::withoutGlobalScopes()->where('organisation_id', $org->id)->count());
+    }
+
+    public function test_request_sync_rejects_end_date_before_start_date(): void
+    {
+        Queue::fake();
+        [$user, $org] = $this->syncAdminAndOrganisation();
+
+        Livewire::actingAs($user)
+            ->test(ExpenseLineReview::class, ['organisation' => $org])
+            ->set('dateFrom', '2026-02-01')
+            ->set('dateTo', '2026-01-01')
+            ->call('requestSync')
+            ->assertHasErrors(['dateTo']);
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_request_sync_does_not_queue_while_another_request_holds_the_lock(): void
+    {
+        Queue::fake();
+        [$user, $org] = $this->syncAdminAndOrganisation();
+
+        $lock = Cache::lock('sync-request:'.$org->id, 10);
+        $this->assertTrue($lock->get());
+
+        try {
+            Livewire::actingAs($user)
+                ->test(ExpenseLineReview::class, ['organisation' => $org])
+                ->set('dateFrom', '2026-01-01')
+                ->set('dateTo', '2026-01-31')
+                ->call('requestSync')
+                ->assertSee(__('A sync is already in progress for this organisation.'), false);
+        } finally {
+            $lock->release();
+        }
+
+        Queue::assertNothingPushed();
+        $this->assertSame(0, SyncRun::withoutGlobalScopes()->where('organisation_id', $org->id)->count());
     }
 }
