@@ -64,7 +64,7 @@ class XeroSsoController extends Controller
         }
 
         if ($user === null) {
-            if (! $this->canProvisionNewUserViaSso($request)) {
+            if (! $this->canProvisionNewUserViaSso($request, $claims['email'])) {
                 return redirect()->route('login')->withErrors([
                     'xero' => __('New sign-ups are disabled for this application. Contact an administrator if you need access.'),
                 ]);
@@ -78,12 +78,23 @@ class XeroSsoController extends Controller
                 'email_verified_at' => now(),
             ]);
         } else {
-            $user->forceFill([
+            $attributes = [
                 'name' => $claims['name'],
-                'email' => $claims['email'],
                 'xero_sub' => $claims['sub'],
                 'email_verified_at' => now(),
-            ])->save();
+            ];
+
+            // Follow an email change in Xero unless another account already uses that address,
+            // which would otherwise fail the unique index and break sign-in.
+            $emailTaken = User::query()
+                ->whereRaw('LOWER(email) = ?', [Str::lower($claims['email'])])
+                ->whereKeyNot($user->id)
+                ->exists();
+            if (! $emailTaken) {
+                $attributes['email'] = $claims['email'];
+            }
+
+            $user->forceFill($attributes)->save();
         }
 
         Auth::login($user, remember: true);
@@ -102,7 +113,7 @@ class XeroSsoController extends Controller
         return redirect()->intended(route('dashboard', absolute: false));
     }
 
-    private function canProvisionNewUserViaSso(Request $request): bool
+    private function canProvisionNewUserViaSso(Request $request, string $email): bool
     {
         if (config('services.xero.allow_open_signup')) {
             return true;
@@ -117,7 +128,10 @@ class XeroSsoController extends Controller
             return false;
         }
 
-        return Invitation::findValidByPlainToken($plain) !== null;
+        // Only the invited address may create an account from an invitation link.
+        $invitation = Invitation::findValidByPlainToken($plain);
+
+        return $invitation !== null && Str::lower($invitation->email) === Str::lower($email);
     }
 
     private function tryCompleteInvitationAfterSso(Request $request, User $user): ?RedirectResponse
