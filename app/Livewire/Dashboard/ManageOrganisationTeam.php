@@ -299,8 +299,7 @@ class ManageOrganisationTeam extends Component
             }
         }
 
-        $organisation->users()->detach($userId);
-        OrganisationMemberRemoval::record($organisation, $userId, (int) auth()->id());
+        OrganisationMemberRemoval::removeMember($organisation, $userId, (int) auth()->id());
 
         $this->successMessage = __('Member removed from organisation.');
     }

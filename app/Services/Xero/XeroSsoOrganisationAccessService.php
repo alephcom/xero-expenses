@@ -76,9 +76,17 @@ class XeroSsoOrganisationAccessService
                     break;
                 }
 
-                $organisation->users()->syncWithoutDetaching([
-                    $user->id => ['role' => OrganisationRole::Reviewer->value],
-                ]);
+                // The removal list was read before the Users call; re-check under the lock an
+                // admin's removal also takes, so a removal made meanwhile still wins.
+                OrganisationMemberRemoval::withMembershipLock($organisation, $user->id, function () use ($organisation, $user): void {
+                    if (OrganisationMemberRemoval::exists($organisation, $user->id)) {
+                        return;
+                    }
+
+                    $organisation->users()->syncWithoutDetaching([
+                        $user->id => ['role' => OrganisationRole::Reviewer->value],
+                    ]);
+                });
                 $memberOrgIds->push($organisation->id);
 
                 break;

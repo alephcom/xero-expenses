@@ -86,6 +86,27 @@ class RemovedMemberStaysRemovedTest extends TestCase
         $this->assertFalse($this->reviewer->fresh()->isMemberOf($this->organisation));
     }
 
+    public function test_removal_made_while_reviewer_sync_is_calling_xero_still_wins(): void
+    {
+        // The reviewer is not a member yet, so the sync will ask Xero about this organisation.
+        $this->organisation->users()->detach($this->reviewer->id);
+
+        $client = Mockery::mock(XeroApiClient::class);
+        $client->shouldReceive('get')
+            ->once()
+            ->andReturnUsing(function (): array {
+                // An admin removes the user after the sync read its removal list.
+                OrganisationMemberRemoval::removeMember($this->organisation, $this->reviewer->id, $this->admin->id);
+
+                return ['Users' => [['EmailAddress' => 'reviewer@example.com', 'OrganisationRole' => 'STANDARD']]];
+            });
+        $this->app->instance(XeroApiClient::class, $client);
+
+        app(XeroSsoOrganisationAccessService::class)->syncReviewerAccessFromXero($this->reviewer->fresh());
+
+        $this->assertFalse($this->reviewer->fresh()->isMemberOf($this->organisation));
+    }
+
     public function test_accepting_a_new_invitation_clears_the_removal(): void
     {
         $this->removeReviewer();
