@@ -5,6 +5,7 @@ namespace Tests\Feature\Jobs;
 use App\Enums\OrganisationRole;
 use App\Jobs\PushLineReviewToXeroJob;
 use App\Jobs\SyncXeroOrganisationJob;
+use App\Jobs\SyncXeroReviewerAccessJob;
 use App\Models\Organisation;
 use App\Models\User;
 use App\Services\Xero\XeroLineReviewWritebackService;
@@ -25,6 +26,16 @@ class XeroJobQueueBehaviourTest extends TestCase
 
         $this->assertGreaterThan((new SyncXeroOrganisationJob(1, '2026-01-01', '2026-01-31', 1))->timeout, $retryAfter);
         $this->assertGreaterThan((new PushLineReviewToXeroJob(1, 'spend', 'p', 'l'))->timeout, $retryAfter);
+        $this->assertGreaterThan((new SyncXeroReviewerAccessJob(1))->timeout, $retryAfter);
+    }
+
+    public function test_reviewer_access_job_outlasts_rate_limit_waits_and_unique_lock_outlasts_it(): void
+    {
+        $job = new SyncXeroReviewerAccessJob(1);
+
+        // XeroApiClient may wait up to 3 x 60s on a single 429; the worker default of 60s would kill it.
+        $this->assertGreaterThanOrEqual(180, $job->timeout);
+        $this->assertGreaterThanOrEqual($job->timeout, $job->uniqueFor);
     }
 
     public function test_sync_and_push_share_one_lock_per_organisation(): void

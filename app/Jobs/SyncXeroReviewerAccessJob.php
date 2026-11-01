@@ -18,7 +18,16 @@ class SyncXeroReviewerAccessJob implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
-    public int $uniqueFor = 600;
+    /**
+     * One Users call per connected organisation, each of which may wait out a 429, so the
+     * worker default (60s) is too short. Keep below the queue connection's retry_after.
+     */
+    public int $timeout = 600;
+
+    public int $tries = 1;
+
+    /** Outlives the timeout only briefly, so a killed run doesn't block the next sign-in for long. */
+    public int $uniqueFor = 660;
 
     public function __construct(
         public int $userId,
