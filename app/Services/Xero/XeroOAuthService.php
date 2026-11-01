@@ -4,6 +4,7 @@ namespace App\Services\Xero;
 
 use App\Models\Organisation;
 use App\Models\XeroConnection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
 class XeroOAuthService
@@ -70,6 +71,31 @@ class XeroOAuthService
         return $response->json();
     }
 
+    /**
+     * Refresh tokens for a connection (and its batch peers) under a lock.
+     *
+     * Xero refresh tokens are single-use and shared by every organisation in an OAuth batch,
+     * so concurrent refreshes would spend the same token twice. Inside the lock the stored
+     * token is re-read: if another process already replaced $staleAccessToken with a token
+     * that is still valid, that token is kept instead of refreshing again.
+     */
+    public function refreshConnectionTokens(XeroConnection $connection, string $staleAccessToken): void
+    {
+        $batchId = Organisation::query()->whereKey($connection->organisation_id)->value('oauth_batch_id');
+        $lockKey = 'xero_token_refresh:'.($batchId ?: 'organisation:'.$connection->organisation_id);
+
+        Cache::lock($lockKey, 60)->block(30, function () use ($connection, $staleAccessToken): void {
+            $current = XeroConnection::withoutGlobalScopes()->findOrFail($connection->id);
+
+            if ($current->access_token !== $staleAccessToken
+                && $current->expires_at->greaterThan(now()->addMinute())) {
+                return;
+            }
+
+            $this->applyRefreshResponse($current, $this->refreshToken($current->refresh_token));
+        });
+    }
+
     public function applyRefreshResponse(XeroConnection $connection, array $payload): void
     {
         $connection->access_token = $payload['access_token'];
@@ -90,16 +116,16 @@ class XeroOAuthService
         $access = $payload['access_token'];
         $refresh = $payload['refresh_token'] ?? $connection->refresh_token;
 
+        $peerOrganisationIds = Organisation::query()
+            ->where('oauth_batch_id', $batchId)
+            ->where('id', '!=', $connection->organisation_id)
+            ->pluck('id');
+
         foreach (
-            Organisation::query()
-                ->where('oauth_batch_id', $batchId)
-                ->where('id', '!=', $connection->organisation_id)
-                ->cursor() as $peerOrg
+            XeroConnection::withoutGlobalScopes()
+                ->whereIn('organisation_id', $peerOrganisationIds)
+                ->cursor() as $peer
         ) {
-            $peer = $peerOrg->xeroConnection;
-            if (! $peer) {
-                continue;
-            }
             $peer->access_token = $access;
             $peer->refresh_token = $refresh;
             $peer->expires_at = $expiresAt;

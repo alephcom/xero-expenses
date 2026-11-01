@@ -234,7 +234,7 @@ class XeroSyncService
         Carbon $dateTo,
         array $expenseAccountIds,
     ): void {
-        // Fetch everything before touching local rows so a failed Xero call leaves the previous data intact.
+        // Fetch everything before deleting so a failed Xero call leaves existing lines intact.
         $rows = [];
         $this->collectSpendLines($organisation, $dateFrom, $dateTo, $expenseAccountIds, $rows);
         $this->collectBillLines($organisation, $dateFrom, $dateTo, $expenseAccountIds, $rows);
@@ -501,6 +501,8 @@ class XeroSyncService
 
     private function replaceLinkedTransactionLines(Organisation $organisation): void
     {
+        // Fetch everything before deleting so a failed Xero call keeps existing links (and the
+        // invoiced-line locks that depend on them) in place.
         $rows = $this->fetchLinkedTransactionRows($organisation);
 
         DB::transaction(function () use ($organisation, $rows): void {

@@ -22,25 +22,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Xero billable expense write-back:** When you mark a line for invoicing, choose an invoice-to contact, or save notes, the app queues a job that updates Xero. Billable expenses use the Linked Transactions API (SPEND and ACCPAY lines). Notes are appended via History on the parent bank transaction or bill, prefixed so multi-line parents stay distinguishable. Linked transaction sync now stores every link from Xero (including drafts without a contact) plus each link’s Xero id. Line reviews record the last pushed note text for deduplication and any push error for display in the expanded row.
 - **Invoice flag from Xero:** After linked transactions are synced, any expense line with a billable link that includes a customer in Xero gets `needs_invoicing` and `selected_contact_id` updated to match. Existing notes and reviewed state on a line review are left unchanged when reconciling.
 
-### Changed
-
-- **Dashboard invitations UI:** The separate invite-only Livewire block is replaced by **Team and invitations** (`ManageOrganisationTeam`), which keeps sending invites and adds invitation and member management for admins.
-
-- **Invoice? for open billable links:** If a line is linked to a customer in Xero but not yet on a sales invoice, the Invoice? checkbox remains enabled. Unchecking clears `needs_invoicing` and write-back deletes the Xero linked transaction (removing the customer link).
-
 ### Fixed
 
+- **Organisation scope leaking between queued jobs:** The queue resets `OrganisationContext` before and after every job, and `SyncXeroOrganisationJob` clears it when done. `Organisation::xeroConnection()` is unscoped, so a write-back for one organisation no longer fails with "No Xero connection" after a sync of another on the same worker, and token refreshes during a sync now reach batch peer connections.
+- **Non-admins could re-batch an existing organisation:** Connecting Xero as a non-admin no longer updates an already-linked organisation's `oauth_batch_id` or name (previously done before the admin check, which let the non-admin's refreshed tokens overwrite the admin's connection).
+- **Concurrent Xero token refreshes:** Refreshes take a cache lock per OAuth batch and re-read the stored token, so two workers no longer spend the same single-use refresh token and break the connection.
+- **Failed syncs deleting local data:** Expense lines and linked transactions are fetched from Xero before local rows are replaced, and accounts, contacts, expense lines, and linked transactions are swapped inside a database transaction. A Xero error mid-sync now leaves the previous data (and invoiced-line locks) intact.
 - **Xero SSO reviewer access is now kept in step with Xero:** Memberships record how they were created. Reviewer access granted automatically at sign-in is removed on a later sign-in once Xero no longer lists the user with an allowed role (never on a failed Xero request). Members added by invitation, Connect Xero, or an admin role change are not touched. When an admin removes a member, sign-in no longer re-adds them; accepting a new invitation lifts that. Existing memberships are treated as manual.
 - **Currency fallback:** Sync stores each organisation's Xero base currency and uses it for transactions without a currency code, instead of USD.
 - **Contact picker payload:** Archived Xero contacts are kept for display but hidden from the Invoice to picker, and the contact list is fetched once when the page loads instead of being embedded in every render (including the two-second sync polling).
 - **`reviewed_at` preserved:** Reconciling billable links from Xero no longer overwrites when a person last edited a line, and rows created by sync leave it empty.
 - **`composer.lock`** content hash refreshed to match `composer.json`.
-- **Xero token refresh race:** Token refreshes are serialised per OAuth batch with a cache lock, and skipped when another worker already rotated the token. Xero refresh tokens are single-use, so concurrent sync and write-back jobs could previously invalidate the connection.
-- **Sync no longer empties data on failure:** Accounts, contacts, expense lines, and linked transactions are fetched from Xero first and then swapped in a database transaction, so a failed request mid-sync leaves the previous data in place.
 - **Write-back API usage:** After a push, only the affected transaction's billable links are re-fetched instead of every link in the organisation. Pushes for the same organisation no longer run concurrently (prevents duplicate links).
 - **Stuck syncs:** Queued or running sync runs untouched for 20 minutes are marked failed so **Refresh from Xero** is not blocked forever after a worker crash. The sync job sets a 900s timeout and the database queue's default `retry_after` is raised to 960s to match.
 - **Sync date range validation:** **Refresh from Xero** rejects invalid ranges and ranges over 366 days.
 - **Xero callback errors:** Cancelling on Xero's consent screen, or a failed token exchange when connecting, now returns a friendly message instead of a validation bounce or server error.
+
+### Changed
+
+- **Dashboard invitations UI:** The separate invite-only Livewire block is replaced by **Team and invitations** (`ManageOrganisationTeam`), which keeps sending invites and adds invitation and member management for admins.
+
+- **Invoice? for open billable links:** If a line is linked to a customer in Xero but not yet on a sales invoice, the Invoice? checkbox remains enabled. Unchecking clears `needs_invoicing` and write-back deletes the Xero linked transaction (removing the customer link).
 
 ## [0.1.0] - 2026-04-06
 
