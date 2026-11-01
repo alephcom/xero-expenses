@@ -1365,4 +1365,51 @@ class ExpenseLineReviewTest extends TestCase
         Queue::assertNothingPushed();
         $this->assertSame(0, SyncRun::withoutGlobalScopes()->where('organisation_id', $org->id)->count());
     }
+
+    public function test_ticking_invoice_forgets_the_previously_recorded_xero_link(): void
+    {
+        Queue::fake();
+        [$user, $org] = $this->syncAdminAndOrganisation();
+
+        $parentId = (string) Str::uuid();
+        $lineId = (string) Str::uuid();
+        $day = Carbon::now()->subDay()->toDateString();
+
+        DB::table('expense_lines')->insert([
+            'organisation_id' => $org->id,
+            'source_kind' => 'spend',
+            'parent_transaction_id' => $parentId,
+            'line_item_id' => $lineId,
+            'occurred_on' => $day,
+            'line_amount' => 1,
+            'currency_code' => 'USD',
+            'account_id' => null,
+            'account_code' => '4000',
+            'description' => 'x',
+            'parent_reference' => 'R',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        LineReview::withoutGlobalScopes()->create([
+            'organisation_id' => $org->id,
+            'source_kind' => 'spend',
+            'parent_transaction_id' => $parentId,
+            'line_item_id' => $lineId,
+            'needs_invoicing' => false,
+            'is_reviewed' => false,
+            'xero_billable_link_id' => (string) Str::uuid(),
+        ]);
+
+        Livewire::actingAs($user)
+            ->test(ExpenseLineReview::class, ['organisation' => $org])
+            ->set('dateFrom', $day)
+            ->set('dateTo', $day)
+            ->call('toggleNeedsInvoicing', 'spend', $parentId, $lineId, true)
+            ->assertHasNoErrors();
+
+        $review = LineReview::withoutGlobalScopes()->where('organisation_id', $org->id)->firstOrFail();
+        $this->assertTrue((bool) $review->needs_invoicing);
+        $this->assertNull($review->xero_billable_link_id);
+    }
 }

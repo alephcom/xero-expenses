@@ -504,6 +504,9 @@ class ExpenseLineReview extends Component
             ],
             [
                 'needs_invoicing' => $value,
+                // Ticking starts a new link request; forget any link recorded from Xero so a sync
+                // that runs before the push doesn't treat the missing link as removed in Xero.
+                ...($value ? ['xero_billable_link_id' => null] : []),
                 'user_id' => auth()->id(),
                 'reviewed_at' => now(),
             ]
