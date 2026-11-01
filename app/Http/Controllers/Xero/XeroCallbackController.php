@@ -15,6 +15,17 @@ class XeroCallbackController extends Controller
 {
     public function __invoke(Request $request, XeroSsoService $sso, XeroOAuthService $oauth): RedirectResponse
     {
+        // Xero redirects back with ?error=access_denied (and no code) when the user cancels consent.
+        if ($request->filled('error')) {
+            $request->session()->forget(['xero_sso_state', 'xero_oauth_state', 'xero_oauth_user_id']);
+
+            if (Auth::check()) {
+                return redirect()->route('dashboard')->with('status', __('Xero connection was cancelled.'));
+            }
+
+            return redirect()->route('login')->withErrors(['xero' => __('Sign-in with Xero was cancelled.')]);
+        }
+
         $request->validate([
             'code' => ['required', 'string'],
             'state' => ['required', 'string'],

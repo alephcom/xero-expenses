@@ -211,6 +211,32 @@ class OrganisationTeamManagementTest extends TestCase
             ->assertHasNoErrors();
 
         $this->assertFalse($org->users()->where('users.id', $reviewer->id)->exists());
+        $this->assertDatabaseHas('organisation_access_exclusions', [
+            'organisation_id' => $org->id,
+            'user_id' => $reviewer->id,
+            'excluded_by' => $admin->id,
+        ]);
+    }
+
+    public function test_role_change_takes_member_out_of_xero_sso_management(): void
+    {
+        $admin = User::factory()->create();
+        $reviewer = User::factory()->create();
+        $org = Organisation::create([
+            'name' => 'Acme',
+            'slug' => 'acme',
+            'xero_tenant_id' => (string) Str::uuid(),
+        ]);
+        $org->users()->attach($admin->id, ['role' => 'admin']);
+        $org->users()->attach($reviewer->id, ['role' => 'reviewer', 'source' => 'xero_sso']);
+
+        Livewire::actingAs($admin)
+            ->test(ManageOrganisationTeam::class)
+            ->set('organisationId', (string) $org->id)
+            ->call('updateMemberRole', $reviewer->id, 'admin')
+            ->assertHasNoErrors();
+
+        $this->assertSame('manual', $org->users()->where('users.id', $reviewer->id)->first()->pivot->source);
     }
 
     public function test_reviewer_cannot_change_member_role(): void

@@ -30,7 +30,7 @@ class XeroSyncService
 
         try {
             $this->touchSyncStep($syncRun, 'organisation');
-            $this->syncOrganisationShortCode($organisation);
+            $this->syncOrganisationDetails($organisation);
 
             $this->touchSyncStep($syncRun, 'accounts');
             $this->syncAccounts($organisation);
@@ -117,9 +117,9 @@ class XeroSyncService
     }
 
     /**
-     * @return list<string>
+     * Store the ShortCode (for deep links) and BaseCurrency (fallback for transactions without a currency).
      */
-    private function syncOrganisationShortCode(Organisation $organisation): void
+    private function syncOrganisationDetails(Organisation $organisation): void
     {
         try {
             $json = $this->client->get($organisation, 'Organisation');
@@ -132,13 +132,16 @@ class XeroSyncService
                 return;
             }
             $shortCode = $first['ShortCode'] ?? null;
-            if (! is_string($shortCode) || $shortCode === '') {
-                return;
+            if (is_string($shortCode) && $shortCode !== '') {
+                $organisation->xero_short_code = $shortCode;
             }
-            $organisation->xero_short_code = $shortCode;
+            $baseCurrency = $first['BaseCurrency'] ?? null;
+            if (is_string($baseCurrency) && strlen($baseCurrency) === 3) {
+                $organisation->base_currency = strtoupper($baseCurrency);
+            }
             $organisation->save();
         } catch (Throwable $e) {
-            Log::warning('Xero organisation ShortCode sync skipped', [
+            Log::warning('Xero organisation details sync skipped', [
                 'organisation_id' => $organisation->id,
                 'message' => $e->getMessage(),
             ]);
@@ -191,7 +194,8 @@ class XeroSyncService
     {
         $rows = [];
         for ($page = 1; ; $page++) {
-            $json = $this->client->get($organisation, 'Contacts', ['page' => $page]);
+            // Xero omits ARCHIVED contacts unless asked; we keep them so existing links still show a name.
+            $json = $this->client->get($organisation, 'Contacts', ['page' => $page, 'includeArchived' => 'true']);
             $contacts = $json['Contacts'] ?? [];
             if (count($contacts) === 0) {
                 break;
@@ -205,6 +209,8 @@ class XeroSyncService
                     'organisation_id' => $organisation->id,
                     'xero_contact_id' => $id,
                     'name' => $c['Name'] ?? 'Unnamed',
+                    // Archived contacts are kept so existing links still show a name, but hidden from the picker.
+                    'is_archived' => isset($c['ContactStatus']) && $c['ContactStatus'] !== 'ACTIVE',
                     'created_at' => now(),
                     'updated_at' => now(),
                 ];
@@ -273,7 +279,7 @@ class XeroSyncService
                     continue;
                 }
                 $date = isset($bt['Date']) ? $this->parseXeroDate($bt['Date'])->toDateString() : $dateFrom->toDateString();
-                $currency = $bt['CurrencyCode'] ?? 'USD';
+                $currency = $bt['CurrencyCode'] ?? $this->fallbackCurrency($organisation);
                 $reference = $bt['Reference'] ?? ($bt['BankAccount']['Name'] ?? null);
                 $lineItems = $bt['LineItems'] ?? [];
                 $parentContactId = $this->parentContactIdFromXeroContact(
@@ -327,7 +333,7 @@ class XeroSyncService
                     continue;
                 }
                 $date = isset($inv['Date']) ? $this->parseXeroDate($inv['Date'])->toDateString() : $dateFrom->toDateString();
-                $currency = $inv['CurrencyCode'] ?? 'USD';
+                $currency = $inv['CurrencyCode'] ?? $this->fallbackCurrency($organisation);
                 $reference = $inv['InvoiceNumber'] ?? null;
                 $lineItems = $inv['LineItems'] ?? [];
                 $parentContactId = $this->parentContactIdFromXeroContact(
@@ -393,6 +399,15 @@ class XeroSyncService
                 'updated_at' => now(),
             ];
         }
+    }
+
+    /**
+     * Xero normally sends CurrencyCode on every transaction; when it does not, use the organisation's base
+     * currency. USD is only a last resort for organisations whose details have never synced.
+     */
+    private function fallbackCurrency(Organisation $organisation): string
+    {
+        return $organisation->base_currency ?: 'USD';
     }
 
     /**
@@ -464,20 +479,51 @@ class XeroSyncService
     }
 
     /**
-     * Re-fetch billable expense links from Xero and replace local rows for this organisation.
+     * Re-fetch billable expense links for a single source transaction (after a write-back) and replace
+     * only those local rows, instead of re-downloading every link in the organisation.
      */
-    public function refreshLinkedTransactionsForOrganisation(Organisation $organisation): void
+    public function refreshLinkedTransactionsForSource(Organisation $organisation, string $sourceTransactionId): void
     {
-        $this->replaceLinkedTransactionLines($organisation);
+        $rows = $this->fetchLinkedTransactionRows($organisation, ['SourceTransactionID' => $sourceTransactionId]);
+
+        DB::transaction(function () use ($organisation, $sourceTransactionId, $rows): void {
+            LinkedTransactionLine::withoutGlobalScopes()
+                ->where('organisation_id', $organisation->id)
+                ->where('source_transaction_id', $sourceTransactionId)
+                ->delete();
+            foreach (array_chunk($rows, 250) as $chunk) {
+                LinkedTransactionLine::withoutGlobalScopes()->insert($chunk);
+            }
+        });
+
+        $this->reconcileLineReviewInvoiceFlagsFromLinkedTransactions($organisation);
     }
 
     private function replaceLinkedTransactionLines(Organisation $organisation): void
     {
         // Fetch everything before deleting so a failed Xero call keeps existing links (and the
         // invoiced-line locks that depend on them) in place.
+        $rows = $this->fetchLinkedTransactionRows($organisation);
+
+        DB::transaction(function () use ($organisation, $rows): void {
+            LinkedTransactionLine::withoutGlobalScopes()->where('organisation_id', $organisation->id)->delete();
+            foreach (array_chunk($rows, 250) as $chunk) {
+                LinkedTransactionLine::withoutGlobalScopes()->insert($chunk);
+            }
+        });
+
+        $this->reconcileLineReviewInvoiceFlagsFromLinkedTransactions($organisation);
+    }
+
+    /**
+     * @param  array<string, string>  $filters
+     * @return list<array<string, mixed>>
+     */
+    private function fetchLinkedTransactionRows(Organisation $organisation, array $filters = []): array
+    {
         $rows = [];
         for ($page = 1; ; $page++) {
-            $json = $this->client->get($organisation, 'LinkedTransactions', ['page' => $page]);
+            $json = $this->client->get($organisation, 'LinkedTransactions', [...$filters, 'page' => $page]);
             $list = $json['LinkedTransactions'] ?? [];
             if (count($list) === 0) {
                 break;
@@ -504,24 +550,21 @@ class XeroSyncService
                     'updated_at' => now(),
                 ];
             }
+            // Xero pages hold 100 records; a short page is the last one, so skip the extra empty request.
+            if (count($list) < 100) {
+                break;
+            }
         }
 
-        DB::transaction(function () use ($organisation, $rows): void {
-            LinkedTransactionLine::withoutGlobalScopes()->where('organisation_id', $organisation->id)->delete();
-            foreach (array_chunk($rows, 250) as $chunk) {
-                LinkedTransactionLine::withoutGlobalScopes()->insert($chunk);
-            }
-        });
-
-        $this->reconcileLineReviewInvoiceFlagsFromLinkedTransactions($organisation);
+        return $rows;
     }
 
     /**
      * Set needs_invoicing (and invoice-to contact) from Xero billable links.
      * Open links (no target invoice): needs_invoicing true when a customer contact is set.
      * Allocated links (TargetTransactionID present): needs_invoicing false; contact from link when present.
-     * On duplicate key, only needs_invoicing, selected_contact_id, reviewed_at, and updated_at are updated
-     * so existing notes and is_reviewed are preserved.
+     * On duplicate key, only needs_invoicing, selected_contact_id, and updated_at are updated so existing
+     * notes, is_reviewed, and reviewed_at (when a person last edited the line) are preserved.
      */
     public function reconcileLineReviewInvoiceFlagsFromLinkedTransactions(Organisation $organisation): void
     {
@@ -569,7 +612,7 @@ class XeroSyncService
                 'user_id' => null,
                 'xero_last_pushed_notes' => null,
                 'xero_push_error' => null,
-                'reviewed_at' => $now,
+                'reviewed_at' => null,
                 'created_at' => $now,
                 'updated_at' => $now,
             ];
@@ -579,7 +622,7 @@ class XeroSyncService
             LineReview::withoutGlobalScopes()->upsert(
                 $chunk,
                 ['organisation_id', 'source_kind', 'parent_transaction_id', 'line_item_id'],
-                ['needs_invoicing', 'selected_contact_id', 'reviewed_at', 'updated_at'],
+                ['needs_invoicing', 'selected_contact_id', 'updated_at'],
             );
         }
     }
@@ -624,7 +667,7 @@ class XeroSyncService
                 'user_id' => null,
                 'xero_last_pushed_notes' => null,
                 'xero_push_error' => null,
-                'reviewed_at' => $now,
+                'reviewed_at' => null,
                 'created_at' => $now,
                 'updated_at' => $now,
             ];
@@ -634,7 +677,7 @@ class XeroSyncService
             LineReview::withoutGlobalScopes()->upsert(
                 $chunk,
                 ['organisation_id', 'source_kind', 'parent_transaction_id', 'line_item_id'],
-                ['needs_invoicing', 'selected_contact_id', 'reviewed_at', 'updated_at'],
+                ['needs_invoicing', 'selected_contact_id', 'updated_at'],
             );
         }
     }

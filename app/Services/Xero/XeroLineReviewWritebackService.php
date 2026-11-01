@@ -24,7 +24,7 @@ class XeroLineReviewWritebackService
     {
         $this->syncBillableExpense($organisation, $review);
         $this->syncHistoryNoteIfNeeded($organisation, $review);
-        $this->syncService->refreshLinkedTransactionsForOrganisation($organisation);
+        $this->syncService->refreshLinkedTransactionsForSource($organisation, $review->parent_transaction_id);
     }
 
     /**

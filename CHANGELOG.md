@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Non-admins could re-batch an existing organisation:** Connecting Xero as a non-admin no longer updates an already-linked organisation's `oauth_batch_id` or name (previously done before the admin check, which let the non-admin's refreshed tokens overwrite the admin's connection).
 - **Concurrent Xero token refreshes:** Refreshes take a cache lock per OAuth batch and re-read the stored token, so two workers no longer spend the same single-use refresh token and break the connection.
 - **Failed syncs deleting local data:** Expense lines and linked transactions are fetched from Xero before local rows are replaced, and accounts, contacts, expense lines, and linked transactions are swapped inside a database transaction. A Xero error mid-sync now leaves the previous data (and invoiced-line locks) intact.
+- **Xero SSO reviewer access is now kept in step with Xero:** Memberships record how they were created. Reviewer access granted automatically at sign-in is removed on a later sign-in once Xero no longer lists the user with an allowed role (never on a failed Xero request). Members added by invitation, Connect Xero, or an admin role change are not touched. When an admin removes a member, sign-in no longer re-adds them; accepting a new invitation lifts that. Existing memberships are treated as manual.
+- **Currency fallback:** Sync stores each organisation's Xero base currency and uses it for transactions without a currency code, instead of USD.
+- **Contact picker payload:** Archived Xero contacts are kept for display but hidden from the Invoice to picker, and the contact list is fetched once when the page loads instead of being embedded in every render (including the two-second sync polling).
+- **`reviewed_at` preserved:** Reconciling billable links from Xero no longer overwrites when a person last edited a line, and rows created by sync leave it empty.
+- **`composer.lock`** content hash refreshed to match `composer.json`.
+- **Write-back API usage:** After a push, only the affected transaction's billable links are re-fetched instead of every link in the organisation. Pushes for the same organisation no longer run concurrently (prevents duplicate links).
+- **Stuck syncs:** Queued or running sync runs untouched for 20 minutes are marked failed so **Refresh from Xero** is not blocked forever after a worker crash. The sync job sets a 900s timeout and the database queue's default `retry_after` is raised to 960s to match.
+- **Sync date range validation:** **Refresh from Xero** rejects invalid ranges and ranges over 366 days.
+- **Xero callback errors:** Cancelling on Xero's consent screen, or a failed token exchange when connecting, now returns a friendly message instead of a validation bounce or server error.
 
 ### Changed
 

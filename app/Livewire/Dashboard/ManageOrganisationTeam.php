@@ -2,13 +2,16 @@
 
 namespace App\Livewire\Dashboard;
 
+use App\Enums\OrganisationMembershipSource;
 use App\Enums\OrganisationRole;
 use App\Models\Invitation;
 use App\Models\Organisation;
+use App\Models\OrganisationAccessExclusion;
 use App\Models\User;
 use App\Notifications\InvitationNotification;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\View\View;
 use Livewire\Component;
@@ -271,7 +274,11 @@ class ManageOrganisationTeam extends Component
             }
         }
 
-        $organisation->users()->updateExistingPivot($userId, ['role' => $newRole]);
+        // An explicit admin decision takes the membership out of automatic Xero SSO management.
+        $organisation->users()->updateExistingPivot($userId, [
+            'role' => $newRole,
+            'source' => OrganisationMembershipSource::Manual->value,
+        ]);
 
         $this->successMessage = __('Role updated.');
     }
@@ -298,7 +305,14 @@ class ManageOrganisationTeam extends Component
             }
         }
 
-        $organisation->users()->detach($userId);
+        DB::transaction(function () use ($organisation, $userId): void {
+            $organisation->users()->detach($userId);
+            // Stop Xero SSO from re-adding them on their next sign-in; a new invitation lifts this.
+            OrganisationAccessExclusion::query()->updateOrCreate(
+                ['organisation_id' => $organisation->id, 'user_id' => $userId],
+                ['excluded_by' => auth()->id()],
+            );
+        });
 
         $this->successMessage = __('Member removed from organisation.');
     }

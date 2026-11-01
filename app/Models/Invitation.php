@@ -2,9 +2,12 @@
 
 namespace App\Models;
 
+use App\Enums\OrganisationMembershipSource;
+use App\Enums\OrganisationRole;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class Invitation extends Model
@@ -66,6 +69,26 @@ class Invitation extends Model
     public function organisation(): BelongsTo
     {
         return $this->belongsTo(Organisation::class);
+    }
+
+    /**
+     * Add the user to the organisation with the invited role. An invitation is an explicit admin decision,
+     * so it lifts any earlier removal and takes the membership out of automatic Xero SSO management.
+     */
+    public function acceptFor(User $user): void
+    {
+        $role = OrganisationRole::tryFrom($this->role) ?? OrganisationRole::Reviewer;
+
+        DB::transaction(function () use ($user, $role): void {
+            $this->organisation->users()->syncWithoutDetaching([
+                $user->id => ['role' => $role->value, 'source' => OrganisationMembershipSource::Invitation->value],
+            ]);
+            OrganisationAccessExclusion::query()
+                ->where('organisation_id', $this->organisation_id)
+                ->where('user_id', $user->id)
+                ->delete();
+            $this->forceFill(['accepted_at' => now()])->save();
+        });
     }
 
     public function isValid(): bool
