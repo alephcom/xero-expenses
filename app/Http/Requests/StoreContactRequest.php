@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\Turnstile;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreContactRequest extends FormRequest
@@ -12,14 +13,30 @@ class StoreContactRequest extends FormRequest
     }
 
     /**
-     * @return array<string, array<int, string>>
+     * @return array<string, array<int, mixed>>
      */
     public function rules(): array
     {
-        return [
+        $rules = [
             'name' => ['required', 'string', 'max:120'],
             'email' => ['required', 'string', 'email', 'max:255'],
             'message' => ['required', 'string', 'max:5000'],
+        ];
+
+        if (Turnstile::enabled()) {
+            $rules['cf-turnstile-response'] = ['bail', 'required', 'string', new Turnstile($this->ip())];
+        }
+
+        return $rules;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'cf-turnstile-response.required' => __('Please complete the verification challenge.'),
         ];
     }
 }

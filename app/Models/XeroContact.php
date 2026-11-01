@@ -14,7 +14,15 @@ class XeroContact extends Model
         'organisation_id',
         'xero_contact_id',
         'name',
+        'is_archived',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'is_archived' => 'boolean',
+        ];
+    }
 
     public function organisation(): BelongsTo
     {

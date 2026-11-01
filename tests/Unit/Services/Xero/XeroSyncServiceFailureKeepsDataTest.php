@@ -123,12 +123,13 @@ class XeroSyncServiceFailureKeepsDataTest extends TestCase
             'api.xero.com/api.xro/2.0/BankTransactions*' => Http::sequence()
                 ->push(['BankTransactions' => [$this->bankTransactionMatchingExistingLine()]])
                 ->push(['BankTransactions' => []]),
+            // A full first page (100 links) so the sync requests page two, which fails.
             'api.xero.com/api.xro/2.0/LinkedTransactions*' => Http::sequence()
-                ->push(['LinkedTransactions' => [[
+                ->push(['LinkedTransactions' => array_map(fn (): array => [
                     'LinkedTransactionID' => (string) Str::uuid(),
                     'SourceTransactionID' => (string) Str::uuid(),
                     'SourceLineItemID' => (string) Str::uuid(),
-                ]]])
+                ], range(1, 100))])
                 ->push(['Title' => 'Server error'], 500),
         ]);
 

@@ -3,6 +3,7 @@
 namespace Tests\Unit\Services\Xero;
 
 use App\Models\Organisation;
+use App\Models\OrganisationAccessExclusion;
 use App\Models\User;
 use App\Models\XeroConnection;
 use App\Services\Xero\XeroApiClient;
@@ -44,6 +45,103 @@ class XeroSsoOrganisationAccessServiceTest extends TestCase
 
         $this->assertTrue($user->organisations()->whereKey($org->id)->exists());
         $this->assertSame('reviewer', $user->organisations()->whereKey($org->id)->first()->pivot->role);
+        $this->assertSame('xero_sso', $user->organisations()->whereKey($org->id)->first()->pivot->source);
+    }
+
+    public function test_revokes_sso_granted_access_when_user_no_longer_listed_in_xero(): void
+    {
+        $org = $this->makeOrgWithConnection();
+        $user = User::factory()->create(['email' => 'gone@example.com']);
+        $org->users()->attach($user->id, ['role' => 'reviewer', 'source' => 'xero_sso']);
+
+        $client = Mockery::mock(XeroApiClient::class);
+        $client->shouldReceive('get')->once()->andReturn(['Users' => [
+            ['EmailAddress' => 'someone-else@example.com', 'OrganisationRole' => 'STANDARD'],
+        ]]);
+        $this->app->instance(XeroApiClient::class, $client);
+
+        $this->makeService()->syncReviewerAccessFromXero($user);
+
+        $this->assertFalse($user->organisations()->whereKey($org->id)->exists());
+    }
+
+    public function test_revokes_sso_granted_access_when_xero_role_is_downgraded(): void
+    {
+        $org = $this->makeOrgWithConnection();
+        $user = User::factory()->create(['email' => 'down@example.com']);
+        $org->users()->attach($user->id, ['role' => 'reviewer', 'source' => 'xero_sso']);
+
+        $client = Mockery::mock(XeroApiClient::class);
+        $client->shouldReceive('get')->once()->andReturn(['Users' => [
+            ['EmailAddress' => 'down@example.com', 'OrganisationRole' => 'READONLY'],
+        ]]);
+        $this->app->instance(XeroApiClient::class, $client);
+
+        $this->makeService()->syncReviewerAccessFromXero($user);
+
+        $this->assertFalse($user->organisations()->whereKey($org->id)->exists());
+    }
+
+    public function test_keeps_sso_granted_access_when_xero_still_lists_user(): void
+    {
+        $org = $this->makeOrgWithConnection();
+        $user = User::factory()->create(['email' => 'stay@example.com']);
+        $org->users()->attach($user->id, ['role' => 'reviewer', 'source' => 'xero_sso']);
+
+        $client = Mockery::mock(XeroApiClient::class);
+        $client->shouldReceive('get')->once()->andReturn(['Users' => [
+            ['EmailAddress' => 'STAY@example.com', 'OrganisationRole' => 'STANDARD'],
+        ]]);
+        $this->app->instance(XeroApiClient::class, $client);
+
+        $this->makeService()->syncReviewerAccessFromXero($user);
+
+        $this->assertTrue($user->organisations()->whereKey($org->id)->exists());
+    }
+
+    public function test_does_not_revoke_when_xero_request_fails(): void
+    {
+        $org = $this->makeOrgWithConnection();
+        $user = User::factory()->create(['email' => 'flaky@example.com']);
+        $org->users()->attach($user->id, ['role' => 'reviewer', 'source' => 'xero_sso']);
+
+        $client = Mockery::mock(XeroApiClient::class);
+        $client->shouldReceive('get')->once()->andThrow(new RuntimeException('upstream error'));
+        $this->app->instance(XeroApiClient::class, $client);
+
+        $this->makeService()->syncReviewerAccessFromXero($user);
+
+        $this->assertTrue($user->organisations()->whereKey($org->id)->exists());
+    }
+
+    public function test_leaves_invited_reviewer_alone_even_when_not_in_xero(): void
+    {
+        $org = $this->makeOrgWithConnection();
+        $user = User::factory()->create(['email' => 'invited@example.com']);
+        $org->users()->attach($user->id, ['role' => 'reviewer', 'source' => 'invitation']);
+
+        $client = Mockery::mock(XeroApiClient::class);
+        $client->shouldNotReceive('get');
+        $this->app->instance(XeroApiClient::class, $client);
+
+        $this->makeService()->syncReviewerAccessFromXero($user);
+
+        $this->assertTrue($user->organisations()->whereKey($org->id)->exists());
+    }
+
+    public function test_does_not_re_add_user_an_admin_removed(): void
+    {
+        $org = $this->makeOrgWithConnection();
+        $user = User::factory()->create(['email' => 'removed@example.com']);
+        OrganisationAccessExclusion::query()->create(['organisation_id' => $org->id, 'user_id' => $user->id]);
+
+        $client = Mockery::mock(XeroApiClient::class);
+        $client->shouldNotReceive('get');
+        $this->app->instance(XeroApiClient::class, $client);
+
+        $this->makeService()->syncReviewerAccessFromXero($user);
+
+        $this->assertFalse($user->organisations()->whereKey($org->id)->exists());
     }
 
     public function test_does_not_attach_for_readonly_role(): void

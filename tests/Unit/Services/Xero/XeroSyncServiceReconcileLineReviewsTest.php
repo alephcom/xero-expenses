@@ -60,6 +60,7 @@ class XeroSyncServiceReconcileLineReviewsTest extends TestCase
         $this->assertNotNull($review);
         $this->assertTrue($review->needs_invoicing);
         $this->assertSame($contactId, $review->selected_contact_id);
+        $this->assertNull($review->reviewed_at);
     }
 
     public function test_reconcile_updates_flags_but_preserves_notes_and_reviewed(): void
@@ -101,7 +102,7 @@ class XeroSyncServiceReconcileLineReviewsTest extends TestCase
             'selected_contact_id' => $contactA,
             'notes' => 'Keep this note',
             'user_id' => null,
-            'reviewed_at' => now()->subDay(),
+            'reviewed_at' => $reviewedAt = now()->subDay()->startOfSecond(),
         ]);
 
         DB::table('linked_transaction_lines')->insert([
@@ -123,6 +124,7 @@ class XeroSyncServiceReconcileLineReviewsTest extends TestCase
         $this->assertSame($contactB, $review->selected_contact_id);
         $this->assertTrue($review->is_reviewed);
         $this->assertSame('Keep this note', $review->notes);
+        $this->assertSame($reviewedAt->toDateTimeString(), $review->reviewed_at->toDateTimeString());
     }
 
     public function test_reconcile_ignores_links_without_contact(): void

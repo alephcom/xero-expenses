@@ -2,9 +2,10 @@
 
 namespace App\Services\Xero;
 
+use App\Enums\OrganisationMembershipSource;
 use App\Enums\OrganisationRole;
 use App\Models\Organisation;
-use App\Models\OrganisationMemberRemoval;
+use App\Models\OrganisationAccessExclusion;
 use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -24,6 +25,12 @@ class XeroSsoOrganisationAccessService
         private readonly XeroApiClient $client,
     ) {}
 
+    /**
+     * Grant reviewer access to linked organisations where Xero lists the user with an allowed role, and
+     * revoke access this service granted earlier once Xero no longer does. Memberships from invitations,
+     * Connect Xero, or admin changes are left alone, and organisations an admin removed the user from
+     * are skipped. A failed Xero request never revokes access.
+     */
     public function syncReviewerAccessFromXero(User $user): void
     {
         if (! filter_var(config('services.xero.sso_auto_reviewer_access', true), FILTER_VALIDATE_BOOLEAN)) {
@@ -32,16 +39,22 @@ class XeroSsoOrganisationAccessService
 
         $emailLower = Str::lower($user->email);
 
-        /** @var Collection<int, int> $memberOrgIds */
-        $memberOrgIds = $user->organisations()->pluck('id');
+        /** @var Collection<int, string> $membershipSources organisation id => pivot source */
+        $membershipSources = $user->organisations()->get()
+            ->mapWithKeys(fn (Organisation $o): array => [$o->id => (string) $o->pivot->source]);
 
-        // An admin removed the user from these; only a new invitation brings them back.
-        $removedFromOrgIds = OrganisationMemberRemoval::query()
-            ->where('user_id', $user->id)
-            ->pluck('organisation_id');
+        /** @var Collection<int, int> $excludedOrgIds */
+        $excludedOrgIds = OrganisationAccessExclusion::query()->where('user_id', $user->id)->pluck('organisation_id');
 
         foreach (Organisation::query()->whereHas('xeroConnection')->orderBy('id')->cursor() as $organisation) {
-            if ($memberOrgIds->contains($organisation->id) || $removedFromOrgIds->contains($organisation->id)) {
+            $source = $membershipSources->get($organisation->id);
+            $isMember = $source !== null;
+
+            if ($isMember && $source !== OrganisationMembershipSource::XeroSso->value) {
+                continue;
+            }
+
+            if (! $isMember && $excludedOrgIds->contains($organisation->id)) {
                 continue;
             }
 
@@ -56,41 +69,68 @@ class XeroSsoOrganisationAccessService
                 continue;
             }
 
-            $users = $payload['Users'] ?? [];
+            $users = $payload['Users'] ?? null;
             if (! is_array($users)) {
                 continue;
             }
 
-            foreach ($users as $row) {
-                if (! is_array($row)) {
-                    continue;
-                }
+            $grantsAccess = $this->xeroUsersGrantAccess($users, $emailLower);
 
-                $addr = $row['EmailAddress'] ?? '';
-                if (! is_string($addr) || Str::lower($addr) !== $emailLower) {
-                    continue;
-                }
+            if ($grantsAccess === $isMember) {
+                continue;
+            }
 
-                $role = strtoupper((string) ($row['OrganisationRole'] ?? ''));
-                if (! in_array($role, self::ALLOWED_XERO_ORG_ROLES, true)) {
-                    break;
-                }
+            // Membership and exclusions were read before the Users call. Re-read them under the lock
+            // that admin removal and invitation acceptance also take, so a change made meanwhile wins.
+            OrganisationAccessExclusion::withMembershipLock($organisation->id, $user->id, function () use ($organisation, $user, $grantsAccess): void {
+                $currentSource = $organisation->users()->where('users.id', $user->id)->first()?->pivot?->source;
 
-                // The removal list was read before the Users call; re-check under the lock an
-                // admin's removal also takes, so a removal made meanwhile still wins.
-                OrganisationMemberRemoval::withMembershipLock($organisation, $user->id, function () use ($organisation, $user): void {
-                    if (OrganisationMemberRemoval::exists($organisation, $user->id)) {
+                if ($grantsAccess) {
+                    if ($currentSource !== null || OrganisationAccessExclusion::existsFor($organisation->id, $user->id)) {
                         return;
                     }
 
-                    $organisation->users()->syncWithoutDetaching([
-                        $user->id => ['role' => OrganisationRole::Reviewer->value],
+                    $organisation->users()->attach($user->id, [
+                        'role' => OrganisationRole::Reviewer->value,
+                        'source' => OrganisationMembershipSource::XeroSso->value,
                     ]);
-                });
-                $memberOrgIds->push($organisation->id);
 
-                break;
-            }
+                    return;
+                }
+
+                if ((string) $currentSource !== OrganisationMembershipSource::XeroSso->value) {
+                    return;
+                }
+
+                $organisation->users()->detach($user->id);
+                Log::info('xero_sso_reviewer_sync.access_revoked', [
+                    'organisation_id' => $organisation->id,
+                    'user_id' => $user->id,
+                ]);
+            });
         }
+    }
+
+    /**
+     * @param  array<mixed>  $users
+     */
+    private function xeroUsersGrantAccess(array $users, string $emailLower): bool
+    {
+        foreach ($users as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $addr = $row['EmailAddress'] ?? '';
+            if (! is_string($addr) || Str::lower($addr) !== $emailLower) {
+                continue;
+            }
+
+            $role = strtoupper((string) ($row['OrganisationRole'] ?? ''));
+
+            return in_array($role, self::ALLOWED_XERO_ORG_ROLES, true);
+        }
+
+        return false;
     }
 }

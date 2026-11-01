@@ -7,7 +7,6 @@ use App\Jobs\Middleware\XeroOrganisationLock;
 use App\Models\LineReview;
 use App\Models\Organisation;
 use App\Services\Xero\XeroLineReviewWritebackService;
-use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
@@ -35,13 +34,19 @@ class PushLineReviewToXeroJob implements ShouldQueue
      */
     public function middleware(): array
     {
+        // One Xero job per organisation at a time, shared with SyncXeroOrganisationJob: concurrent pushes
+        // for the same line could create duplicate billable links, and both a push and a sync rewrite
+        // the organisation's local link mirror.
         return [
             XeroOrganisationLock::for($this->organisationId, $this->timeout),
             new EnsureMinimumDuration,
         ];
     }
 
-    public function retryUntil(): DateTimeInterface
+    /**
+     * Overlap releases count as attempts, so bound retries by time rather than a fixed count.
+     */
+    public function retryUntil(): \DateTimeInterface
     {
         return now()->addMinutes(30);
     }

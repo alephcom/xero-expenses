@@ -10,7 +10,6 @@ use App\Models\User;
 use App\Services\Xero\XeroSyncService;
 use App\Support\OrganisationContext;
 use Carbon\Carbon;
-use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Gate;
@@ -30,11 +29,14 @@ class SyncXeroOrganisationJob implements ShouldQueue
 {
     use Queueable;
 
-    /** Keep below the queue connection's retry_after so a running sync is never picked up twice. */
-    public int $timeout = 900;
-
-    /** Releases while another Xero job holds the organisation lock are fine; a real error is not retried. */
+    /** Releases while a write-back holds the organisation lock are fine; a real error is not retried. */
     public int $maxExceptions = 1;
+
+    /**
+     * Large organisations page through many Xero requests. The queue connection's retry_after must be
+     * longer than this, or a second worker will pick the job up while it is still running.
+     */
+    public int $timeout = 900;
 
     public function __construct(
         public int $organisationId,
@@ -55,7 +57,10 @@ class SyncXeroOrganisationJob implements ShouldQueue
         ];
     }
 
-    public function retryUntil(): DateTimeInterface
+    /**
+     * Overlap releases count as attempts, so bound retries by time rather than a fixed count.
+     */
+    public function retryUntil(): \DateTimeInterface
     {
         return now()->addMinutes(30);
     }

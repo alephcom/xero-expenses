@@ -2,11 +2,11 @@
 
 namespace Tests\Feature\Auth;
 
+use App\Enums\OrganisationMembershipSource;
 use App\Jobs\SyncXeroReviewerAccessJob;
 use App\Livewire\Dashboard\ManageOrganisationTeam;
 use App\Models\Invitation;
 use App\Models\Organisation;
-use App\Models\OrganisationMemberRemoval;
 use App\Models\User;
 use App\Models\XeroConnection;
 use App\Services\Xero\XeroApiClient;
@@ -16,10 +16,13 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
-use Livewire\Volt\Volt;
 use Mockery;
 use Tests\TestCase;
 
+/**
+ * Admin removal and invitation acceptance must win over a Xero SSO reviewer sync that read
+ * membership before its (slow) Xero Users call.
+ */
 class RemovedMemberStaysRemovedTest extends TestCase
 {
     use RefreshDatabase;
@@ -28,7 +31,7 @@ class RemovedMemberStaysRemovedTest extends TestCase
 
     private User $admin;
 
-    private User $reviewer;
+    private User $member;
 
     protected function setUp(): void
     {
@@ -48,84 +51,72 @@ class RemovedMemberStaysRemovedTest extends TestCase
         ]);
 
         $this->admin = User::factory()->create();
-        $this->reviewer = User::factory()->create(['email' => 'reviewer@example.com']);
+        $this->member = User::factory()->create(['email' => 'member@example.com']);
         $this->organisation->users()->attach($this->admin->id, ['role' => 'admin']);
-        $this->organisation->users()->attach($this->reviewer->id, ['role' => 'reviewer']);
     }
 
-    private function removeReviewer(): void
+    /**
+     * @param  list<array<string, string>>  $xeroUsers
+     */
+    private function mockXeroUsersCall(array $xeroUsers, callable $duringCall): void
     {
-        Livewire::actingAs($this->admin)
-            ->test(ManageOrganisationTeam::class)
-            ->set('organisationId', (string) $this->organisation->id)
-            ->call('removeMember', $this->reviewer->id)
-            ->assertHasNoErrors();
-    }
-
-    public function test_removing_a_member_records_the_removal(): void
-    {
-        $this->removeReviewer();
-
-        $this->assertDatabaseHas('organisation_member_removals', [
-            'organisation_id' => $this->organisation->id,
-            'user_id' => $this->reviewer->id,
-            'removed_by' => $this->admin->id,
-        ]);
-    }
-
-    public function test_xero_reviewer_sync_does_not_re_add_a_removed_member(): void
-    {
-        $this->removeReviewer();
-
         $client = Mockery::mock(XeroApiClient::class);
-        $client->shouldNotReceive('get');
+        $client->shouldReceive('get')
+            ->once()
+            ->andReturnUsing(function () use ($xeroUsers, $duringCall): array {
+                $duringCall();
+
+                return ['Users' => $xeroUsers];
+            });
         $this->app->instance(XeroApiClient::class, $client);
-
-        app(XeroSsoOrganisationAccessService::class)->syncReviewerAccessFromXero($this->reviewer->fresh());
-
-        $this->assertFalse($this->reviewer->fresh()->isMemberOf($this->organisation));
     }
 
     public function test_removal_made_while_reviewer_sync_is_calling_xero_still_wins(): void
     {
-        // The reviewer is not a member yet, so the sync will ask Xero about this organisation.
-        $this->organisation->users()->detach($this->reviewer->id);
+        // Not a member when the sync starts, so it will consider attaching.
+        $this->mockXeroUsersCall(
+            [['EmailAddress' => 'member@example.com', 'OrganisationRole' => 'STANDARD']],
+            function (): void {
+                // The admin removes them (records the exclusion) while the sync is waiting on Xero.
+                $this->organisation->users()->attach($this->member->id, ['role' => 'reviewer']);
+                Livewire::actingAs($this->admin)
+                    ->test(ManageOrganisationTeam::class)
+                    ->set('organisationId', (string) $this->organisation->id)
+                    ->call('removeMember', $this->member->id)
+                    ->assertHasNoErrors();
+            },
+        );
 
-        $client = Mockery::mock(XeroApiClient::class);
-        $client->shouldReceive('get')
-            ->once()
-            ->andReturnUsing(function (): array {
-                // An admin removes the user after the sync read its removal list.
-                OrganisationMemberRemoval::removeMember($this->organisation, $this->reviewer->id, $this->admin->id);
+        app(XeroSsoOrganisationAccessService::class)->syncReviewerAccessFromXero($this->member->fresh());
 
-                return ['Users' => [['EmailAddress' => 'reviewer@example.com', 'OrganisationRole' => 'STANDARD']]];
-            });
-        $this->app->instance(XeroApiClient::class, $client);
-
-        app(XeroSsoOrganisationAccessService::class)->syncReviewerAccessFromXero($this->reviewer->fresh());
-
-        $this->assertFalse($this->reviewer->fresh()->isMemberOf($this->organisation));
+        $this->assertFalse($this->member->fresh()->isMemberOf($this->organisation));
     }
 
-    public function test_accepting_a_new_invitation_clears_the_removal(): void
+    public function test_invitation_accepted_while_reviewer_sync_is_calling_xero_is_not_revoked(): void
     {
-        $this->removeReviewer();
+        $this->organisation->users()->attach($this->member->id, [
+            'role' => 'reviewer',
+            'source' => OrganisationMembershipSource::XeroSso->value,
+        ]);
 
         $created = Invitation::createWithPlainToken([
-            'email' => 'reviewer@example.com',
+            'email' => 'member@example.com',
             'organisation_id' => $this->organisation->id,
             'role' => 'reviewer',
             'invited_by' => $this->admin->id,
             'expires_at' => now()->addDay(),
         ]);
 
-        Volt::actingAs($this->reviewer)
-            ->test('pages.auth.accept-invitation', ['token' => $created['plain_token']])
-            ->call('acceptAuthenticated')
-            ->assertHasNoErrors();
+        // Xero no longer lists them, but they accept an invitation while the sync is waiting on Xero.
+        $this->mockXeroUsersCall([], function () use ($created): void {
+            $created['invitation']->fresh()->acceptFor($this->member);
+        });
 
-        $this->assertTrue($this->reviewer->fresh()->isMemberOf($this->organisation));
-        $this->assertSame(0, OrganisationMemberRemoval::query()->count());
+        app(XeroSsoOrganisationAccessService::class)->syncReviewerAccessFromXero($this->member->fresh());
+
+        $membership = $this->organisation->users()->where('users.id', $this->member->id)->first();
+        $this->assertNotNull($membership);
+        $this->assertSame(OrganisationMembershipSource::Invitation->value, $membership->pivot->source);
     }
 
     public function test_sso_sign_in_queues_reviewer_access_sync_instead_of_running_it_inline(): void
@@ -139,9 +130,9 @@ class RemovedMemberStaysRemovedTest extends TestCase
         $sso = Mockery::mock(XeroSsoService::class);
         $sso->shouldReceive('exchangeCode')->once()->andReturn(['id_token' => 'jwt']);
         $sso->shouldReceive('verifyIdToken')->once()->andReturn([
-            'sub' => 'xero-sub-reviewer',
-            'email' => 'reviewer@example.com',
-            'name' => 'Reviewer',
+            'sub' => 'xero-sub-member',
+            'email' => 'member@example.com',
+            'name' => 'Member',
         ]);
         $this->app->instance(XeroSsoService::class, $sso);
 
@@ -149,7 +140,7 @@ class RemovedMemberStaysRemovedTest extends TestCase
             ->get(route('xero.callback', ['code' => 'code', 'state' => 'state']))
             ->assertRedirect(route('dashboard', absolute: false));
 
-        Queue::assertPushed(SyncXeroReviewerAccessJob::class, fn (SyncXeroReviewerAccessJob $job): bool => $job->userId === $this->reviewer->id);
+        Queue::assertPushed(SyncXeroReviewerAccessJob::class, fn (SyncXeroReviewerAccessJob $job): bool => $job->userId === $this->member->id);
     }
 
     protected function tearDown(): void

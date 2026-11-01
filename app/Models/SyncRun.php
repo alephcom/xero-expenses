@@ -22,6 +22,12 @@ class SyncRun extends Model
 
     public const STATUS_FAILED = 'failed';
 
+    /**
+     * A queued or running run untouched for this long belongs to a worker that died or never started;
+     * kept above the sync job's timeout so live runs are never expired.
+     */
+    public const STALE_AFTER_MINUTES = 20;
+
     protected $fillable = [
         'organisation_id',
         'status',
@@ -47,5 +53,21 @@ class SyncRun extends Model
     public function organisation(): BelongsTo
     {
         return $this->belongsTo(Organisation::class);
+    }
+
+    /**
+     * Mark abandoned queued/running runs as failed so they stop blocking new syncs for the organisation.
+     */
+    public static function failStaleRuns(int $organisationId): void
+    {
+        static::withoutGlobalScopes()
+            ->where('organisation_id', $organisationId)
+            ->whereIn('status', [self::STATUS_QUEUED, self::STATUS_RUNNING])
+            ->where('updated_at', '<', now()->subMinutes(self::STALE_AFTER_MINUTES))
+            ->update([
+                'status' => self::STATUS_FAILED,
+                'finished_at' => now(),
+                'error_message' => __('Sync did not finish. Please try again.'),
+            ]);
     }
 }

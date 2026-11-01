@@ -71,10 +71,10 @@ Use `QUEUE_CONNECTION=database` (default in `.env.example`) so sync jobs can run
 
 1. Open `/` or go to **`/login`** and **Sign in with Xero**.
 2. On the **Dashboard**, organisation **admins** use **Connect Xero** to authorize tenants. **Reviewers** see orgs they belong to; the Connect button appears when they admin at least one org or have no orgs yet.
-3. **Admins** use **Team and invitations** on the dashboard (per organisation): send invites by email, **view** pending, expired, and accepted invitations, **resend** or **revoke** pending/expired invites, and **manage members** (promote to admin, demote to reviewer, or remove from the organisation). The org must always keep at least one admin.
+3. **Admins** use **Team and invitations** on the dashboard (per organisation): send invites by email, **view** pending, expired, and accepted invitations, **resend** or **revoke** pending/expired invites, and **manage members** (promote to admin, demote to reviewer, or remove from the organisation). The org must always keep at least one admin. Removing a member also stops **Sign in with Xero** from re-adding them automatically; sending them a new invitation lifts that.
 4. Invitees use the email link and sign in with Xero using the **invited email** (already signed-in users can accept from the link directly).
 5. Open **Review expenses** for an organisation (`/orgs/{public_id}/expenses`). Route keys use an opaque **`public_id`** (ULID), not the internal numeric id.
-6. Xero users in a connected organisation get **reviewer** access automatically after signing in with Xero (a background job). Someone an admin **removes** is not re-added this way; send them a new invitation to bring them back.
+6. Xero users in a connected organisation get **reviewer** access automatically after signing in with Xero (a background job), and lose it once Xero no longer lists them. Someone an admin **removes** is not re-added this way; send them a new invitation to bring them back.
 
 ## Syncing data
 
@@ -88,7 +88,7 @@ Use `QUEUE_CONNECTION=database` (default in `.env.example`) so sync jobs can run
 - If the app sits behind a reverse proxy or load balancer, configure **trusted proxies** so Laravel generates correct HTTPS URLs and secure cookies.
 - Keep **`XERO_ALLOW_OPEN_SIGNUP=false`** unless you intentionally allow anyone to create an account via Xero.
 - Use a **shared cache store that supports locks** (e.g. `CACHE_STORE=database` or Redis) for every web server and queue worker. Xero token refreshes and the one-Xero-job-per-organisation lock depend on it.
-- Keep the queue's **`retry_after`** above the sync job timeout (900s). The default is 960s (`DB_QUEUE_RETRY_AFTER`); lowering it lets a long sync be picked up by a second worker.
+- Keep the queue's **`retry_after`** above the sync job timeout (900s). The default is 960s; lowering it lets a long sync be picked up by a second worker.
 - Run **`php artisan queue:restart`** after each deploy so workers load the new code.
 
 ## Optional: seeded test user
