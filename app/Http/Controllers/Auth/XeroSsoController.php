@@ -3,9 +3,9 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\SyncXeroReviewerAccessJob;
 use App\Models\Invitation;
 use App\Models\User;
-use App\Services\Xero\XeroSsoOrganisationAccessService;
 use App\Services\Xero\XeroSsoService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -62,7 +62,7 @@ class XeroSsoController extends Controller
         }
 
         if ($user === null) {
-            if (! $this->canProvisionNewUserViaSso($request)) {
+            if (! $this->canProvisionNewUserViaSso($request, $claims['email'])) {
                 return redirect()->route('login')->withErrors([
                     'xero' => __('New sign-ups are disabled for this application. Contact an administrator if you need access.'),
                 ]);
@@ -76,6 +76,21 @@ class XeroSsoController extends Controller
                 'email_verified_at' => now(),
             ]);
         } else {
+            // The stored email must always be the one Xero just verified: invitations and reviewer
+            // auto-access are granted by email. If another account already holds it, refuse sign-in
+            // rather than keep an address the id_token no longer asserts (or hit the unique index).
+            $emailTaken = User::query()
+                ->whereRaw('LOWER(email) = ?', [Str::lower($claims['email'])])
+                ->whereKeyNot($user->id)
+                ->exists();
+            if ($emailTaken) {
+                $request->session()->forget('post_sso_invitation_plain');
+
+                return redirect()->route('login')->withErrors([
+                    'xero' => __('Your Xero email address is already used by another account here. Contact an administrator to merge or update the accounts.'),
+                ]);
+            }
+
             $user->forceFill([
                 'name' => $claims['name'],
                 'email' => $claims['email'],
@@ -90,7 +105,7 @@ class XeroSsoController extends Controller
         $invitationRedirect = $this->tryCompleteInvitationAfterSso($request, $user);
 
         if (Auth::check()) {
-            app(XeroSsoOrganisationAccessService::class)->syncReviewerAccessFromXero($user->fresh());
+            SyncXeroReviewerAccessJob::dispatch($user->id);
         }
 
         if ($invitationRedirect !== null) {
@@ -100,7 +115,7 @@ class XeroSsoController extends Controller
         return redirect()->intended(route('dashboard', absolute: false));
     }
 
-    private function canProvisionNewUserViaSso(Request $request): bool
+    private function canProvisionNewUserViaSso(Request $request, string $email): bool
     {
         if (config('services.xero.allow_open_signup')) {
             return true;
@@ -115,7 +130,10 @@ class XeroSsoController extends Controller
             return false;
         }
 
-        return Invitation::findValidByPlainToken($plain) !== null;
+        // Only the invited address may create an account from an invitation link.
+        $invitation = Invitation::findValidByPlainToken($plain);
+
+        return $invitation !== null && Str::lower($invitation->email) === Str::lower($email);
     }
 
     private function tryCompleteInvitationAfterSso(Request $request, User $user): ?RedirectResponse

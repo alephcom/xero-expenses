@@ -305,13 +305,17 @@ class ManageOrganisationTeam extends Component
             }
         }
 
-        DB::transaction(function () use ($organisation, $userId): void {
-            $organisation->users()->detach($userId);
-            // Stop Xero SSO from re-adding them on their next sign-in; a new invitation lifts this.
-            OrganisationAccessExclusion::query()->updateOrCreate(
-                ['organisation_id' => $organisation->id, 'user_id' => $userId],
-                ['excluded_by' => auth()->id()],
-            );
+        // Under the membership lock, and exclusion first, so a Xero SSO reviewer sync running at the
+        // same time can't re-attach the user between the two writes.
+        OrganisationAccessExclusion::withMembershipLock($organisation->id, $userId, function () use ($organisation, $userId): void {
+            DB::transaction(function () use ($organisation, $userId): void {
+                // Stop Xero SSO from re-adding them on their next sign-in; a new invitation lifts this.
+                OrganisationAccessExclusion::query()->updateOrCreate(
+                    ['organisation_id' => $organisation->id, 'user_id' => $userId],
+                    ['excluded_by' => auth()->id()],
+                );
+                $organisation->users()->detach($userId);
+            });
         });
 
         $this->successMessage = __('Member removed from organisation.');

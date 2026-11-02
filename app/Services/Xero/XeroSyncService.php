@@ -570,6 +570,31 @@ class XeroSyncService
     {
         $this->upsertLineReviewsForOpenBillableLinks($organisation);
         $this->upsertLineReviewsForAllocatedBillableLinks($organisation);
+        $this->clearLineReviewsWhoseBillableLinkWasRemoved($organisation);
+    }
+
+    /**
+     * A review that recorded a Xero link which no longer exists locally had its link removed in
+     * Xero: clear needs_invoicing so the line stops showing as pending. Reviews with no recorded
+     * link (the user ticked Invoice? and the push hasn't created one yet) are left alone.
+     */
+    private function clearLineReviewsWhoseBillableLinkWasRemoved(Organisation $organisation): void
+    {
+        LineReview::withoutGlobalScopes()
+            ->where('line_reviews.organisation_id', $organisation->id)
+            ->whereNotNull('line_reviews.xero_billable_link_id')
+            ->whereNotExists(function ($query): void {
+                $query->selectRaw('1')
+                    ->from('linked_transaction_lines as ltl')
+                    ->whereColumn('ltl.organisation_id', 'line_reviews.organisation_id')
+                    ->whereColumn('ltl.source_transaction_id', 'line_reviews.parent_transaction_id')
+                    ->whereColumn('ltl.source_line_item_id', 'line_reviews.line_item_id');
+            })
+            ->update([
+                'needs_invoicing' => false,
+                'xero_billable_link_id' => null,
+                'updated_at' => now(),
+            ]);
     }
 
     private function upsertLineReviewsForOpenBillableLinks(Organisation $organisation): void
@@ -589,6 +614,7 @@ class XeroSyncService
                 'el.parent_transaction_id',
                 'el.line_item_id',
                 'ltl.contact_id',
+                'ltl.xero_linked_transaction_id',
             ])
             ->distinct()
             ->get();
@@ -607,6 +633,7 @@ class XeroSyncService
                 'line_item_id' => (string) $row->line_item_id,
                 'needs_invoicing' => true,
                 'selected_contact_id' => (string) $row->contact_id,
+                'xero_billable_link_id' => (string) $row->xero_linked_transaction_id,
                 'is_reviewed' => false,
                 'notes' => null,
                 'user_id' => null,
@@ -622,7 +649,7 @@ class XeroSyncService
             LineReview::withoutGlobalScopes()->upsert(
                 $chunk,
                 ['organisation_id', 'source_kind', 'parent_transaction_id', 'line_item_id'],
-                ['needs_invoicing', 'selected_contact_id', 'updated_at'],
+                ['needs_invoicing', 'selected_contact_id', 'xero_billable_link_id', 'updated_at'],
             );
         }
     }
@@ -643,6 +670,7 @@ class XeroSyncService
                 'el.parent_transaction_id',
                 'el.line_item_id',
                 'ltl.contact_id',
+                'ltl.xero_linked_transaction_id',
             ])
             ->distinct()
             ->get();
@@ -662,6 +690,7 @@ class XeroSyncService
                 'line_item_id' => (string) $row->line_item_id,
                 'needs_invoicing' => false,
                 'selected_contact_id' => $contactId,
+                'xero_billable_link_id' => (string) $row->xero_linked_transaction_id,
                 'is_reviewed' => false,
                 'notes' => null,
                 'user_id' => null,
@@ -677,7 +706,7 @@ class XeroSyncService
             LineReview::withoutGlobalScopes()->upsert(
                 $chunk,
                 ['organisation_id', 'source_kind', 'parent_transaction_id', 'line_item_id'],
-                ['needs_invoicing', 'selected_contact_id', 'updated_at'],
+                ['needs_invoicing', 'selected_contact_id', 'xero_billable_link_id', 'updated_at'],
             );
         }
     }

@@ -76,18 +76,38 @@ class XeroSsoOrganisationAccessService
 
             $grantsAccess = $this->xeroUsersGrantAccess($users, $emailLower);
 
-            if ($grantsAccess && ! $isMember) {
-                $organisation->users()->attach($user->id, [
-                    'role' => OrganisationRole::Reviewer->value,
-                    'source' => OrganisationMembershipSource::XeroSso->value,
-                ]);
-            } elseif (! $grantsAccess && $isMember) {
+            if ($grantsAccess === $isMember) {
+                continue;
+            }
+
+            // Membership and exclusions were read before the Users call. Re-read them under the lock
+            // that admin removal and invitation acceptance also take, so a change made meanwhile wins.
+            OrganisationAccessExclusion::withMembershipLock($organisation->id, $user->id, function () use ($organisation, $user, $grantsAccess): void {
+                $currentSource = $organisation->users()->where('users.id', $user->id)->first()?->pivot?->source;
+
+                if ($grantsAccess) {
+                    if ($currentSource !== null || OrganisationAccessExclusion::existsFor($organisation->id, $user->id)) {
+                        return;
+                    }
+
+                    $organisation->users()->attach($user->id, [
+                        'role' => OrganisationRole::Reviewer->value,
+                        'source' => OrganisationMembershipSource::XeroSso->value,
+                    ]);
+
+                    return;
+                }
+
+                if ((string) $currentSource !== OrganisationMembershipSource::XeroSso->value) {
+                    return;
+                }
+
                 $organisation->users()->detach($user->id);
                 Log::info('xero_sso_reviewer_sync.access_revoked', [
                     'organisation_id' => $organisation->id,
                     'user_id' => $user->id,
                 ]);
-            }
+            });
         }
     }
 

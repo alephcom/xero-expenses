@@ -219,4 +219,110 @@ class XeroSyncServiceReconcileLineReviewsTest extends TestCase
         $this->assertFalse($review->needs_invoicing);
         $this->assertSame($contactId, $review->selected_contact_id);
     }
+
+    /**
+     * @return array{0: Organisation, 1: string, 2: string}
+     */
+    private function organisationWithExpenseLine(): array
+    {
+        $org = Organisation::create([
+            'name' => 'Removal Org',
+            'slug' => 'removal-org-'.Str::lower(Str::random(4)),
+            'xero_tenant_id' => (string) Str::uuid(),
+        ]);
+        $parentId = (string) Str::uuid();
+        $lineId = (string) Str::uuid();
+
+        DB::table('expense_lines')->insert([
+            'organisation_id' => $org->id,
+            'source_kind' => 'spend',
+            'parent_transaction_id' => $parentId,
+            'line_item_id' => $lineId,
+            'occurred_on' => now()->toDateString(),
+            'line_amount' => 10,
+            'currency_code' => 'USD',
+            'account_id' => null,
+            'account_code' => '4000',
+            'description' => 'Item',
+            'parent_reference' => 'R',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return [$org, $parentId, $lineId];
+    }
+
+    private function reconcile(Organisation $org): void
+    {
+        (new XeroSyncService($this->createMock(XeroApiClient::class)))
+            ->reconcileLineReviewInvoiceFlagsFromLinkedTransactions($org);
+    }
+
+    public function test_reconcile_records_the_xero_link_id_for_an_open_link(): void
+    {
+        [$org, $parentId, $lineId] = $this->organisationWithExpenseLine();
+        $linkId = (string) Str::uuid();
+
+        DB::table('linked_transaction_lines')->insert([
+            'organisation_id' => $org->id,
+            'xero_linked_transaction_id' => $linkId,
+            'source_transaction_id' => $parentId,
+            'source_line_item_id' => $lineId,
+            'contact_id' => (string) Str::uuid(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->reconcile($org);
+
+        $review = LineReview::withoutGlobalScopes()->where('organisation_id', $org->id)->firstOrFail();
+        $this->assertSame($linkId, $review->xero_billable_link_id);
+    }
+
+    public function test_reconcile_clears_invoice_flag_when_recorded_link_was_removed_in_xero(): void
+    {
+        [$org, $parentId, $lineId] = $this->organisationWithExpenseLine();
+        $contactId = (string) Str::uuid();
+
+        LineReview::withoutGlobalScopes()->create([
+            'organisation_id' => $org->id,
+            'source_kind' => 'spend',
+            'parent_transaction_id' => $parentId,
+            'line_item_id' => $lineId,
+            'needs_invoicing' => true,
+            'is_reviewed' => true,
+            'selected_contact_id' => $contactId,
+            'xero_billable_link_id' => (string) Str::uuid(),
+            'notes' => 'Keep me',
+        ]);
+
+        $this->reconcile($org);
+
+        $review = LineReview::withoutGlobalScopes()->where('organisation_id', $org->id)->firstOrFail();
+        $this->assertFalse((bool) $review->needs_invoicing);
+        $this->assertNull($review->xero_billable_link_id);
+        $this->assertSame('Keep me', $review->notes);
+        $this->assertTrue((bool) $review->is_reviewed);
+    }
+
+    public function test_reconcile_keeps_invoice_flag_that_has_not_been_pushed_yet(): void
+    {
+        [$org, $parentId, $lineId] = $this->organisationWithExpenseLine();
+
+        LineReview::withoutGlobalScopes()->create([
+            'organisation_id' => $org->id,
+            'source_kind' => 'spend',
+            'parent_transaction_id' => $parentId,
+            'line_item_id' => $lineId,
+            'needs_invoicing' => true,
+            'is_reviewed' => false,
+            'selected_contact_id' => (string) Str::uuid(),
+            'xero_billable_link_id' => null,
+        ]);
+
+        $this->reconcile($org);
+
+        $review = LineReview::withoutGlobalScopes()->where('organisation_id', $org->id)->firstOrFail();
+        $this->assertTrue((bool) $review->needs_invoicing);
+    }
 }

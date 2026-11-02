@@ -79,15 +79,17 @@ class Invitation extends Model
     {
         $role = OrganisationRole::tryFrom($this->role) ?? OrganisationRole::Reviewer;
 
-        DB::transaction(function () use ($user, $role): void {
-            $this->organisation->users()->syncWithoutDetaching([
-                $user->id => ['role' => $role->value, 'source' => OrganisationMembershipSource::Invitation->value],
-            ]);
-            OrganisationAccessExclusion::query()
-                ->where('organisation_id', $this->organisation_id)
-                ->where('user_id', $user->id)
-                ->delete();
-            $this->forceFill(['accepted_at' => now()])->save();
+        OrganisationAccessExclusion::withMembershipLock($this->organisation_id, $user->id, function () use ($user, $role): void {
+            DB::transaction(function () use ($user, $role): void {
+                $this->organisation->users()->syncWithoutDetaching([
+                    $user->id => ['role' => $role->value, 'source' => OrganisationMembershipSource::Invitation->value],
+                ]);
+                OrganisationAccessExclusion::query()
+                    ->where('organisation_id', $this->organisation_id)
+                    ->where('user_id', $user->id)
+                    ->delete();
+                $this->forceFill(['accepted_at' => now()])->save();
+            });
         });
     }
 

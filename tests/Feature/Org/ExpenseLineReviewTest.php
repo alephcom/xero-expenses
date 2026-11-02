@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Support\ExpenseReviewDatePresets;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -1381,5 +1382,91 @@ class ExpenseLineReviewTest extends TestCase
         Livewire::actingAs($user)
             ->test(ExpenseLineReview::class, ['organisation' => $org])
             ->assertSet('activeSyncRunId', $run->id);
+    }
+
+    /**
+     * @return array{0: User, 1: Organisation}
+     */
+    private function syncAdminAndOrganisation(): array
+    {
+        $user = User::factory()->create();
+        $org = Organisation::create([
+            'name' => 'Validate Org',
+            'slug' => 'validate-org',
+            'xero_tenant_id' => (string) Str::uuid(),
+        ]);
+        $org->users()->attach($user->id, ['role' => 'admin']);
+
+        return [$user, $org];
+    }
+
+    public function test_request_sync_does_not_queue_while_another_request_holds_the_lock(): void
+    {
+        Queue::fake();
+        [$user, $org] = $this->syncAdminAndOrganisation();
+
+        $lock = Cache::lock('sync-request:'.$org->id, 10);
+        $this->assertTrue($lock->get());
+
+        try {
+            Livewire::actingAs($user)
+                ->test(ExpenseLineReview::class, ['organisation' => $org])
+                ->set('dateFrom', '2026-01-01')
+                ->set('dateTo', '2026-01-31')
+                ->call('requestSync')
+                ->assertSee(__('A sync is already in progress for this organisation.'), false);
+        } finally {
+            $lock->release();
+        }
+
+        Queue::assertNothingPushed();
+        $this->assertSame(0, SyncRun::withoutGlobalScopes()->where('organisation_id', $org->id)->count());
+    }
+
+    public function test_ticking_invoice_forgets_the_previously_recorded_xero_link(): void
+    {
+        Queue::fake();
+        [$user, $org] = $this->syncAdminAndOrganisation();
+
+        $parentId = (string) Str::uuid();
+        $lineId = (string) Str::uuid();
+        $day = Carbon::now()->subDay()->toDateString();
+
+        DB::table('expense_lines')->insert([
+            'organisation_id' => $org->id,
+            'source_kind' => 'spend',
+            'parent_transaction_id' => $parentId,
+            'line_item_id' => $lineId,
+            'occurred_on' => $day,
+            'line_amount' => 1,
+            'currency_code' => 'USD',
+            'account_id' => null,
+            'account_code' => '4000',
+            'description' => 'x',
+            'parent_reference' => 'R',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        LineReview::withoutGlobalScopes()->create([
+            'organisation_id' => $org->id,
+            'source_kind' => 'spend',
+            'parent_transaction_id' => $parentId,
+            'line_item_id' => $lineId,
+            'needs_invoicing' => false,
+            'is_reviewed' => false,
+            'xero_billable_link_id' => (string) Str::uuid(),
+        ]);
+
+        Livewire::actingAs($user)
+            ->test(ExpenseLineReview::class, ['organisation' => $org])
+            ->set('dateFrom', $day)
+            ->set('dateTo', $day)
+            ->call('toggleNeedsInvoicing', 'spend', $parentId, $lineId, true)
+            ->assertHasNoErrors();
+
+        $review = LineReview::withoutGlobalScopes()->where('organisation_id', $org->id)->firstOrFail();
+        $this->assertTrue((bool) $review->needs_invoicing);
+        $this->assertNull($review->xero_billable_link_id);
     }
 }
