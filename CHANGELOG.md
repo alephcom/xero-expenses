@@ -50,6 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Invoice? for open billable links:** If a line is linked to a customer in Xero but not yet on a sales invoice, the Invoice? checkbox remains enabled. Unchecking clears `needs_invoicing` and write-back deletes the Xero linked transaction (removing the customer link).
 
+### Security
+
+- **Dependency updates for critical and high advisories:**
+  - **PHP:** `laravel/framework` 13.3.0 → 13.39.0 (critical TokenGuard authentication bypass; CRLF injection in the email rule), `guzzlehttp/guzzle` 7.10.0 → 7.16.1 (host-check bypass; kept on 7.x), `league/commonmark` 2.8.2 → 2.10.7 (several denial-of-service issues and an XSS filter bypass), `symfony/http-foundation`, `symfony/http-kernel` and `symfony/mime` 7.4.8 → 7.4.22 (ReDoS, HEAD method filter bypass, email header injection). Dependencies they require were updated alongside; no other major version changes.
+  - **JavaScript (build tooling):** `axios` pinned to exactly 1.20.0 (was `>=1.11.0 <=1.14.0`); `npm audit fix` updated `vite`, `postcss`, `concurrently`, `shell-quote`, `form-data`, `nanoid`, `browserslist` and `source-map-js` within their existing ranges. `npm audit` now reports no vulnerabilities.
+
 ## [0.1.0] - 2026-04-06
 
 First released version: Laravel application to connect Xero tenants, sync expense-related data, review lines in the browser, invite organisation members, and sign in with Xero SSO where configured.
