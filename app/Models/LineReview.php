@@ -18,6 +18,7 @@ class LineReview extends Model
         'is_reviewed',
         'needs_invoicing',
         'selected_contact_id',
+        'xero_billable_link_id',
         'notes',
         'xero_last_pushed_notes',
         'xero_push_error',

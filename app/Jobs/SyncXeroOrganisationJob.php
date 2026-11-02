@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Jobs\Middleware\EnsureMinimumDuration;
+use App\Jobs\Middleware\XeroOrganisationLock;
 use App\Models\Organisation;
 use App\Models\SyncRun;
 use App\Models\User;
@@ -28,7 +29,8 @@ class SyncXeroOrganisationJob implements ShouldQueue
 {
     use Queueable;
 
-    public int $tries = 1;
+    /** Releases while a write-back holds the organisation lock are fine; a real error is not retried. */
+    public int $maxExceptions = 1;
 
     /**
      * Large organisations page through many Xero requests. The queue connection's retry_after must be
@@ -49,7 +51,18 @@ class SyncXeroOrganisationJob implements ShouldQueue
      */
     public function middleware(): array
     {
-        return [new EnsureMinimumDuration];
+        return [
+            XeroOrganisationLock::for($this->organisationId, $this->timeout),
+            new EnsureMinimumDuration,
+        ];
+    }
+
+    /**
+     * Overlap releases count as attempts, so bound retries by time rather than a fixed count.
+     */
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addMinutes(30);
     }
 
     /**

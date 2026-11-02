@@ -3,18 +3,24 @@
 namespace App\Jobs;
 
 use App\Jobs\Middleware\EnsureMinimumDuration;
+use App\Jobs\Middleware\XeroOrganisationLock;
 use App\Models\LineReview;
 use App\Models\Organisation;
 use App\Services\Xero\XeroLineReviewWritebackService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class PushLineReviewToXeroJob implements ShouldQueue
 {
     use Queueable;
+
+    /** Keep below the queue connection's retry_after so a running push is never picked up twice. */
+    public int $timeout = 120;
+
+    /** Releases while another Xero job holds the organisation lock are fine; a real error is not retried. */
+    public int $maxExceptions = 1;
 
     public function __construct(
         public int $organisationId,
@@ -28,10 +34,11 @@ class PushLineReviewToXeroJob implements ShouldQueue
      */
     public function middleware(): array
     {
-        // One write-back per organisation at a time: concurrent pushes for the same line could create
-        // duplicate billable links, and each push rewrites the organisation's local link mirror.
+        // One Xero job per organisation at a time, shared with SyncXeroOrganisationJob: concurrent pushes
+        // for the same line could create duplicate billable links, and both a push and a sync rewrite
+        // the organisation's local link mirror.
         return [
-            (new WithoutOverlapping('xero-push:'.$this->organisationId))->releaseAfter(5)->expireAfter(300),
+            XeroOrganisationLock::for($this->organisationId, $this->timeout),
             new EnsureMinimumDuration,
         ];
     }

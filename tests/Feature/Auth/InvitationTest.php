@@ -146,4 +146,30 @@ class InvitationTest extends TestCase
         $this->assertSame('invitation', $membership->pivot->source);
         $this->assertDatabaseMissing('organisation_access_exclusions', ['organisation_id' => $org->id, 'user_id' => $invitee->id]);
     }
+
+    public function test_signed_in_user_opening_invite_link_sees_accept_button(): void
+    {
+        $inviter = User::factory()->create();
+        $org = Organisation::create([
+            'name' => 'Route Org',
+            'slug' => 'route-org',
+            'xero_tenant_id' => (string) Str::uuid(),
+        ]);
+        $org->users()->attach($inviter->id, ['role' => 'admin']);
+
+        $created = Invitation::createWithPlainToken([
+            'email' => 'signed-in@example.com',
+            'organisation_id' => $org->id,
+            'role' => 'reviewer',
+            'invited_by' => $inviter->id,
+            'expires_at' => now()->addDay(),
+        ]);
+
+        $invitee = User::factory()->create(['email' => 'signed-in@example.com']);
+
+        $this->actingAs($invitee)
+            ->get(route('invitations.accept', ['token' => $created['plain_token']]))
+            ->assertOk()
+            ->assertSee(__('Accept invitation'));
+    }
 }
